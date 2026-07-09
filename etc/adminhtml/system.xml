@@ -1,0 +1,61 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Copyright © MageDevGroup. All rights reserved.
+ */
+-->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+        xsi:noNamespaceSchemaLocation="urn:magento:module:Magento_Config:etc/system_file.xsd">
+    <system>
+        <tab id="magedevgroup" translate="label" sortOrder="400">
+            <label>MageDevGroup</label>
+        </tab>
+        <section id="magedevgroup_admin_scim" translate="label" type="text" sortOrder="20"
+                 showInDefault="1" showInWebsite="0" showInStore="0">
+            <class>separator-top</class>
+            <label>Admin SCIM</label>
+            <tab>magedevgroup</tab>
+            <resource>MageDevGroup_AdminScim::config</resource>
+            <group id="general" translate="label" type="text" sortOrder="10"
+                   showInDefault="1" showInWebsite="0" showInStore="0">
+                <label>General</label>
+                <field id="enabled" translate="label" type="select" sortOrder="10"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Enable Admin SCIM</label>
+                    <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
+                </field>
+                <field id="bearer_token" translate="label comment" type="obscure" sortOrder="20"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Bearer Token</label>
+                    <backend_model>Magento\Config\Model\Config\Backend\Encrypted</backend_model>
+                    <comment><![CDATA[The provisioning credential the IdP presents as
+                        <code>Authorization: Bearer &lt;token&gt;</code>. Stored encrypted.
+                        Treat as a full admin-provisioning secret — use a long random value and rotate it.]]></comment>
+                    <depends>
+                        <field id="enabled">1</field>
+                    </depends>
+                </field>
+                <field id="group_role_map" translate="label comment" type="textarea" sortOrder="30"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Group → Role Map</label>
+                    <comment><![CDATA[One <code>displayName=role_id</code> per line, mapping a SCIM
+                        group to a Magento admin role id. A provisioned member gets the first
+                        matching role (admins hold a single role). Lines starting with
+                        <code>#</code> are ignored.]]></comment>
+                    <depends>
+                        <field id="enabled">1</field>
+                    </depends>
+                </field>
+                <field id="default_role" translate="label comment" type="text" sortOrder="40"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Default Role Id</label>
+                    <comment><![CDATA[ACL role id assigned when a member's groups match no rule.
+                        Leave empty to deny (no role) unmapped members.]]></comment>
+                    <depends>
+                        <field id="enabled">1</field>
+                    </depends>
+                </field>
+            </group>
+        </section>
+    </system>
+</config>
