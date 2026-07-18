@@ -3,7 +3,7 @@
     "description": "SCIM 2.0 provisioning server for Magento 2 admin users — RFC 7643/7644 endpoints so an IdP (Okta, Entra) can create, update and deactivate admin_user accounts and map groups to ACL roles, without anyone logging in.",
     "type": "magento2-module",
     "license": "OSL-3.0",
-    "version": "0.0.2",
+    "version": "0.0.3",
     "require": {
         "php": "~8.3.0||~8.4.0||~8.5.0",
         "magento/framework": ">=103.0"
