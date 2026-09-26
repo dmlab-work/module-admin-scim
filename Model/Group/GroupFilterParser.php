@@ -1,12 +1,12 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Model\Group;
+namespace DmLab\AdminScim\Model\Group;
 
-use MageDevGroup\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Exception\ScimException;
 
 /**
  * Parses the narrow SCIM filter subset this server honours for `GET /Groups`:

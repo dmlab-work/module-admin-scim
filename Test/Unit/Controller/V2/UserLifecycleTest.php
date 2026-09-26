@@ -1,23 +1,23 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Test\Unit\Controller\V2;
+namespace DmLab\AdminScim\Test\Unit\Controller\V2;
 
-use MageDevGroup\AdminScim\Controller\V2\Users;
-use MageDevGroup\AdminScim\Model\Auth\BearerTokenAuthenticator;
-use MageDevGroup\AdminScim\Model\Normalization\RequestNormalizerChain;
-use MageDevGroup\AdminScim\Model\Response\ListResponseBuilder;
-use MageDevGroup\AdminScim\Model\User\FilterParser;
-use MageDevGroup\AdminScim\Model\User\ScimUserMapper;
-use MageDevGroup\AdminScim\Model\User\ScimUserPatcher;
-use MageDevGroup\AdminScim\Model\User\ScimUserRepository;
-use MageDevGroup\AdminScim\Model\User\UserProvisioner;
-use MageDevGroup\AdminScim\Test\Unit\Doubles\AdminUserStore;
-use MageDevGroup\AdminScim\Test\Unit\Doubles\InMemoryScimTrait;
-use MageDevGroup\AdminScim\Test\Unit\Doubles\ScimResponseCapture;
+use DmLab\AdminScim\Controller\V2\Users;
+use DmLab\AdminScim\Model\Auth\BearerTokenAuthenticator;
+use DmLab\AdminScim\Model\Normalization\RequestNormalizerChain;
+use DmLab\AdminScim\Model\Response\ListResponseBuilder;
+use DmLab\AdminScim\Model\User\FilterParser;
+use DmLab\AdminScim\Model\User\ScimUserMapper;
+use DmLab\AdminScim\Model\User\ScimUserPatcher;
+use DmLab\AdminScim\Model\User\ScimUserRepository;
+use DmLab\AdminScim\Model\User\UserProvisioner;
+use DmLab\AdminScim\Test\Unit\Doubles\AdminUserStore;
+use DmLab\AdminScim\Test\Unit\Doubles\InMemoryScimTrait;
+use DmLab\AdminScim\Test\Unit\Doubles\ScimResponseCapture;
 use Magento\Framework\Serialize\Serializer\Json;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;

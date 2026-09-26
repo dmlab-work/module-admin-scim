@@ -1,13 +1,13 @@
 <?xml version="1.0"?>
 <!--
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 -->
 <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
     <!-- Provider-quirk seam: `admin-scim-<idp>` plugins di-merge their normalizer here. -->
-    <type name="MageDevGroup\AdminScim\Model\Normalization\RequestNormalizerChain">
+    <type name="DmLab\AdminScim\Model\Normalization\RequestNormalizerChain">
         <arguments>
             <argument name="normalizers" xsi:type="array"/>
         </arguments>

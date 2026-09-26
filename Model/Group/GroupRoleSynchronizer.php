@@ -1,13 +1,13 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Model\Group;
+namespace DmLab\AdminScim\Model\Group;
 
-use MageDevGroup\AdminScim\Model\Config;
-use MageDevGroup\AdminScim\Model\Mapping\MappingEngine;
+use DmLab\AdminScim\Model\Config;
+use DmLab\AdminScim\Model\Mapping\MappingEngine;
 use Magento\Authorization\Model\RoleFactory;
 use Magento\User\Model\ResourceModel\User as UserResource;
 use Magento\User\Model\UserFactory;

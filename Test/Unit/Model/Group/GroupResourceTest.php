@@ -1,13 +1,13 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Test\Unit\Model\Group;
+namespace DmLab\AdminScim\Test\Unit\Model\Group;
 
-use MageDevGroup\AdminScim\Model\Group\GroupResource;
-use MageDevGroup\AdminScim\Model\Group\ScimGroup;
+use DmLab\AdminScim\Model\Group\GroupResource;
+use DmLab\AdminScim\Model\Group\ScimGroup;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Adapter\Pdo\Mysql;
 use Magento\Framework\DB\Select;
@@ -87,7 +87,7 @@ class GroupResourceTest extends TestCase
         $group = new ScimGroup(10, 'Renamed', null);
         $this->connection->expects(self::never())->method('insert');
         $this->connection->expects(self::once())->method('update')
-            ->with('magedevgroup_scim_group', ['display_name' => 'Renamed', 'external_id' => null], self::anything());
+            ->with('dmlab_scim_group', ['display_name' => 'Renamed', 'external_id' => null], self::anything());
 
         $this->resource->save($group);
     }

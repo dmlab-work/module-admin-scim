@@ -1,20 +1,20 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Test\Unit\Model\Group;
+namespace DmLab\AdminScim\Test\Unit\Model\Group;
 
-use MageDevGroup\AdminScim\Exception\ScimException;
-use MageDevGroup\AdminScim\Model\Group\GroupProvisioner;
-use MageDevGroup\AdminScim\Model\Group\GroupResource;
-use MageDevGroup\AdminScim\Model\Group\GroupRoleSynchronizer;
-use MageDevGroup\AdminScim\Model\Group\MemberResource;
-use MageDevGroup\AdminScim\Model\Group\ScimGroup;
-use MageDevGroup\AdminScim\Model\Group\ScimGroupMapper;
-use MageDevGroup\AdminScim\Model\Group\ScimGroupPatcher;
-use MageDevGroup\AdminScim\Model\Group\ScimGroupRepository;
+use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\Group\GroupProvisioner;
+use DmLab\AdminScim\Model\Group\GroupResource;
+use DmLab\AdminScim\Model\Group\GroupRoleSynchronizer;
+use DmLab\AdminScim\Model\Group\MemberResource;
+use DmLab\AdminScim\Model\Group\ScimGroup;
+use DmLab\AdminScim\Model\Group\ScimGroupMapper;
+use DmLab\AdminScim\Model\Group\ScimGroupPatcher;
+use DmLab\AdminScim\Model\Group\ScimGroupRepository;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Adapter\AdapterInterface;
 use PHPUnit\Framework\MockObject\MockObject;

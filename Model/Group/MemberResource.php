@@ -1,15 +1,15 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Model\Group;
+namespace DmLab\AdminScim\Model\Group;
 
 use Magento\Framework\App\ResourceConnection;
 
 /**
- * Membership storage for SCIM Groups (`magedevgroup_scim_group_member`).
+ * Membership storage for SCIM Groups (`dmlab_scim_group_member`).
  *
  * Direct-connection access to the join table: read a group's members (with the
  * admin username for the SCIM `display` sub-attribute), add/remove/replace members,
@@ -18,8 +18,8 @@ use Magento\Framework\App\ResourceConnection;
  */
 class MemberResource
 {
-    private const MEMBER_TABLE = 'magedevgroup_scim_group_member';
-    private const GROUP_TABLE = 'magedevgroup_scim_group';
+    private const MEMBER_TABLE = 'dmlab_scim_group_member';
+    private const GROUP_TABLE = 'dmlab_scim_group';
     private const USER_TABLE = 'admin_user';
 
     /**

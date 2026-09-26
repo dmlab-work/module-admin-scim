@@ -1,14 +1,14 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Controller;
+namespace DmLab\AdminScim\Controller;
 
-use MageDevGroup\AdminScim\Exception\ScimException;
-use MageDevGroup\AdminScim\Model\Auth\BearerTokenAuthenticator;
-use MageDevGroup\AdminScim\Model\Response\ScimResponse;
+use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\Auth\BearerTokenAuthenticator;
+use DmLab\AdminScim\Model\Response\ScimResponse;
 use Magento\Framework\App\Action\HttpDeleteActionInterface;
 use Magento\Framework\App\Action\HttpGetActionInterface;
 use Magento\Framework\App\Action\HttpPatchActionInterface;

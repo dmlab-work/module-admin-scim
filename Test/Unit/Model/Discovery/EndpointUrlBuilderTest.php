@@ -1,12 +1,12 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Test\Unit\Model\Discovery;
+namespace DmLab\AdminScim\Test\Unit\Model\Discovery;
 
-use MageDevGroup\AdminScim\Model\Discovery\EndpointUrlBuilder;
+use DmLab\AdminScim\Model\Discovery\EndpointUrlBuilder;
 use Magento\Store\Model\Store;
 use Magento\Store\Model\StoreManagerInterface;
 use PHPUnit\Framework\TestCase;

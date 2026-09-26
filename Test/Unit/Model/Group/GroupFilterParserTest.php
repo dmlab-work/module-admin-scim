@@ -1,13 +1,13 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Test\Unit\Model\Group;
+namespace DmLab\AdminScim\Test\Unit\Model\Group;
 
-use MageDevGroup\AdminScim\Exception\ScimException;
-use MageDevGroup\AdminScim\Model\Group\GroupFilterParser;
+use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\Group\GroupFilterParser;
 use PHPUnit\Framework\TestCase;
 
 class GroupFilterParserTest extends TestCase

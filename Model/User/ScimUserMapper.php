@@ -1,13 +1,13 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Model\User;
+namespace DmLab\AdminScim\Model\User;
 
-use MageDevGroup\AdminScim\Exception\ScimException;
-use MageDevGroup\AdminScim\Model\Discovery\EndpointUrlBuilder;
+use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\Discovery\EndpointUrlBuilder;
 use Magento\User\Model\User;
 
 /**
@@ -24,7 +24,7 @@ class ScimUserMapper
     public const SCHEMA_USER = 'urn:ietf:params:scim:schemas:core:2.0:User';
 
     /** admin_user column linking the account to its SCIM resource (see etc/db_schema.xml). */
-    public const EXTERNAL_ID_FIELD = 'magedevgroup_scim_external_id';
+    public const EXTERNAL_ID_FIELD = 'dmlab_scim_external_id';
 
     /** Lastname used when the payload carries no usable family name. */
     private const DEFAULT_LAST_NAME = 'SCIM';

@@ -1,16 +1,16 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Test\Unit\Model\Group;
+namespace DmLab\AdminScim\Test\Unit\Model\Group;
 
-use MageDevGroup\AdminScim\Exception\ScimException;
-use MageDevGroup\AdminScim\Model\Discovery\EndpointUrlBuilder;
-use MageDevGroup\AdminScim\Model\Group\ScimGroup;
-use MageDevGroup\AdminScim\Model\Group\ScimGroupMapper;
-use MageDevGroup\AdminScim\Model\Group\ScimGroupPatcher;
+use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\Discovery\EndpointUrlBuilder;
+use DmLab\AdminScim\Model\Group\ScimGroup;
+use DmLab\AdminScim\Model\Group\ScimGroupMapper;
+use DmLab\AdminScim\Model\Group\ScimGroupPatcher;
 use PHPUnit\Framework\TestCase;
 
 class ScimGroupPatcherTest extends TestCase

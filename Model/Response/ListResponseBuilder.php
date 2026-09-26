@@ -1,10 +1,10 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Model\Response;
+namespace DmLab\AdminScim\Model\Response;
 
 /**
  * Assembles a SCIM `ListResponse` document (RFC 7644 §3.4.2) from already-rendered

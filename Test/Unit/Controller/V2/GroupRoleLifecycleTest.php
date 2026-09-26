@@ -1,29 +1,29 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Test\Unit\Controller\V2;
+namespace DmLab\AdminScim\Test\Unit\Controller\V2;
 
-use MageDevGroup\AdminScim\Controller\V2\Groups;
-use MageDevGroup\AdminScim\Model\Auth\BearerTokenAuthenticator;
-use MageDevGroup\AdminScim\Model\Config;
-use MageDevGroup\AdminScim\Model\Group\GroupFilterParser;
-use MageDevGroup\AdminScim\Model\Group\GroupProvisioner;
-use MageDevGroup\AdminScim\Model\Group\GroupResource;
-use MageDevGroup\AdminScim\Model\Group\GroupRoleSynchronizer;
-use MageDevGroup\AdminScim\Model\Group\MemberResource;
-use MageDevGroup\AdminScim\Model\Group\ScimGroup;
-use MageDevGroup\AdminScim\Model\Group\ScimGroupMapper;
-use MageDevGroup\AdminScim\Model\Group\ScimGroupPatcher;
-use MageDevGroup\AdminScim\Model\Group\ScimGroupRepository;
-use MageDevGroup\AdminScim\Model\Normalization\RequestNormalizerChain;
-use MageDevGroup\AdminScim\Model\Response\ListResponseBuilder;
-use MageDevGroup\AdminScim\Test\Unit\Doubles\AdminUserStore;
-use MageDevGroup\AdminScim\Test\Unit\Doubles\InMemoryScimTrait;
-use MageDevGroup\AdminScim\Test\Unit\Doubles\ScimResponseCapture;
-use MageDevGroup\AdminScim\Model\Mapping\MappingEngine;
+use DmLab\AdminScim\Controller\V2\Groups;
+use DmLab\AdminScim\Model\Auth\BearerTokenAuthenticator;
+use DmLab\AdminScim\Model\Config;
+use DmLab\AdminScim\Model\Group\GroupFilterParser;
+use DmLab\AdminScim\Model\Group\GroupProvisioner;
+use DmLab\AdminScim\Model\Group\GroupResource;
+use DmLab\AdminScim\Model\Group\GroupRoleSynchronizer;
+use DmLab\AdminScim\Model\Group\MemberResource;
+use DmLab\AdminScim\Model\Group\ScimGroup;
+use DmLab\AdminScim\Model\Group\ScimGroupMapper;
+use DmLab\AdminScim\Model\Group\ScimGroupPatcher;
+use DmLab\AdminScim\Model\Group\ScimGroupRepository;
+use DmLab\AdminScim\Model\Normalization\RequestNormalizerChain;
+use DmLab\AdminScim\Model\Response\ListResponseBuilder;
+use DmLab\AdminScim\Test\Unit\Doubles\AdminUserStore;
+use DmLab\AdminScim\Test\Unit\Doubles\InMemoryScimTrait;
+use DmLab\AdminScim\Test\Unit\Doubles\ScimResponseCapture;
+use DmLab\AdminScim\Model\Mapping\MappingEngine;
 use Magento\Authorization\Model\Role;
 use Magento\Authorization\Model\RoleFactory;
 use Magento\Framework\Serialize\Serializer\Json;

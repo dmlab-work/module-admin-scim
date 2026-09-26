@@ -1,6 +1,6 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  *
  * Standalone unit-test bootstrap: loads Magento's Composer autoloader (for the
  * framework classes), registers a PSR-4 map for this module so classes resolve
@@ -33,7 +33,7 @@ if (!$autoloaderLoaded) {
 }
 
 $psr4 = [
-    'MageDevGroup\\AdminScim\\' => $moduleRoot,
+    'DmLab\\AdminScim\\' => $moduleRoot,
 ];
 
 spl_autoload_register(static function (string $class) use ($psr4): void {

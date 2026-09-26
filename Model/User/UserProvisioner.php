@@ -1,12 +1,12 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Model\User;
+namespace DmLab\AdminScim\Model\User;
 
-use MageDevGroup\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Exception\ScimException;
 use Magento\Framework\DB\Adapter\DuplicateException;
 use Magento\Framework\Exception\AlreadyExistsException;
 use Magento\Framework\Math\Random;
@@ -190,7 +190,7 @@ class UserProvisioner
      * The {@see assertUnique} pre-checks catch the common collision, but a request
      * that races another can still slip a duplicate `username`/`externalId` past
      * them and hit a DB unique index (core `ADMIN_USER_USERNAME`, this module's
-     * `MAGEDEVGROUP_ADMIN_SCIM_EXTERNAL_ID`). Convert that into the same SCIM `409`
+     * `DMLAB_ADMIN_SCIM_EXTERNAL_ID`). Convert that into the same SCIM `409`
      * `uniqueness` instead of leaking a generic 500. `admin_user.email` has no
      * unique index, so its uniqueness rests on the pre-check alone (best-effort
      * under a race); email is not a login key, so a duplicate there is harmless.

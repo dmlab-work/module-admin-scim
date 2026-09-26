@@ -1,12 +1,12 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Model\Group;
+namespace DmLab\AdminScim\Model\Group;
 
-use MageDevGroup\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Exception\ScimException;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Adapter\DuplicateException;
 
@@ -90,7 +90,7 @@ class GroupProvisioner
      * uniqueness is re-checked against every *other* group. Every admin whose
      * membership changed has its ACL role re-derived.
      *
-     * @param string $id the SCIM resource id (magedevgroup_scim_group.group_id)
+     * @param string $id the SCIM resource id (dmlab_scim_group.group_id)
      * @param array<string,mixed> $body decoded PatchOp resource
      * @return ScimGroup the updated group
      * @throws ScimException 404 when absent, 400 on a malformed op, 409 on a

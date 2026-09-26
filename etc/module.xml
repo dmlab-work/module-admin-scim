@@ -1,10 +1,10 @@
 <?xml version="1.0"?>
 <!--
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 -->
 <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
         xsi:noNamespaceSchemaLocation="urn:magento:framework:Module/etc/module.xsd">
-    <module name="MageDevGroup_AdminScim" setup_version="0.0.1"/>
+    <module name="DmLab_AdminScim" setup_version="0.0.1"/>
 </config>

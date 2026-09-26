@@ -1,12 +1,12 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Test\Unit\Model\Response;
+namespace DmLab\AdminScim\Test\Unit\Model\Response;
 
-use MageDevGroup\AdminScim\Model\Response\ListResponseBuilder;
+use DmLab\AdminScim\Model\Response\ListResponseBuilder;
 use PHPUnit\Framework\TestCase;
 
 class ListResponseBuilderTest extends TestCase

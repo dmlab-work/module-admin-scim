@@ -1,14 +1,14 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Test\Unit\Model\User;
+namespace DmLab\AdminScim\Test\Unit\Model\User;
 
-use MageDevGroup\AdminScim\Exception\ScimException;
-use MageDevGroup\AdminScim\Model\User\FilterParser;
-use MageDevGroup\AdminScim\Model\User\ScimUserRepository;
+use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\User\FilterParser;
+use DmLab\AdminScim\Model\User\ScimUserRepository;
 use Magento\Framework\DB\Select;
 use Magento\User\Model\ResourceModel\User as UserResource;
 use Magento\User\Model\ResourceModel\User\Collection;

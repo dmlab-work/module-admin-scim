@@ -1,13 +1,13 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Test\Unit\Doubles;
+namespace DmLab\AdminScim\Test\Unit\Doubles;
 
-use MageDevGroup\AdminScim\Model\Discovery\EndpointUrlBuilder;
-use MageDevGroup\AdminScim\Model\Response\ScimResponse;
+use DmLab\AdminScim\Model\Discovery\EndpointUrlBuilder;
+use DmLab\AdminScim\Model\Response\ScimResponse;
 use Magento\Framework\App\Request\Http;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\Controller\Result\Raw;

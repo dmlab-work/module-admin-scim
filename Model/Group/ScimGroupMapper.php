@@ -1,13 +1,13 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Model\Group;
+namespace DmLab\AdminScim\Model\Group;
 
-use MageDevGroup\AdminScim\Exception\ScimException;
-use MageDevGroup\AdminScim\Model\Discovery\EndpointUrlBuilder;
+use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\Discovery\EndpointUrlBuilder;
 
 /**
  * Pure translation between a SCIM Group payload and the persisted group.

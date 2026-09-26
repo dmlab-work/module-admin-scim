@@ -1,10 +1,10 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Model;
+namespace DmLab\AdminScim\Model;
 
 use Magento\Framework\App\Config\ScopeConfigInterface;
 use Magento\Framework\Encryption\EncryptorInterface;
@@ -20,16 +20,16 @@ use Magento\Framework\Encryption\EncryptorInterface;
 class Config
 {
     /** Whether the SCIM provisioning endpoint is enabled. */
-    public const XML_PATH_ENABLED = 'magedevgroup_admin_scim/general/enabled';
+    public const XML_PATH_ENABLED = 'dmlab_admin_scim/general/enabled';
 
     /** Bearer token the IdP presents, stored encrypted. */
-    public const XML_PATH_BEARER_TOKEN = 'magedevgroup_admin_scim/general/bearer_token';
+    public const XML_PATH_BEARER_TOKEN = 'dmlab_admin_scim/general/bearer_token';
 
     /** SCIM-group → ACL-role rules, one `displayName=role_id` per line. */
-    public const XML_PATH_GROUP_ROLE_MAP = 'magedevgroup_admin_scim/general/group_role_map';
+    public const XML_PATH_GROUP_ROLE_MAP = 'dmlab_admin_scim/general/group_role_map';
 
     /** ACL role id assigned when a member's groups match no mapping rule. */
-    public const XML_PATH_DEFAULT_ROLE = 'magedevgroup_admin_scim/general/default_role';
+    public const XML_PATH_DEFAULT_ROLE = 'dmlab_admin_scim/general/default_role';
 
     /**
      * @param ScopeConfigInterface $scopeConfig
@@ -71,7 +71,7 @@ class Config
      *
      * Reads the `displayName=role_id` lines; blank lines and `#` comments are
      * ignored, later entries win on duplicate group names. Applied by
-     * {@see \MageDevGroup\AdminScim\Model\Group\GroupRoleSynchronizer}.
+     * {@see \DmLab\AdminScim\Model\Group\GroupRoleSynchronizer}.
      *
      * @return array<string,string> group displayName → ACL role id
      */

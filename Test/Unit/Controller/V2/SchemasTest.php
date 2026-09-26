@@ -1,15 +1,15 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Test\Unit\Controller\V2;
+namespace DmLab\AdminScim\Test\Unit\Controller\V2;
 
-use MageDevGroup\AdminScim\Controller\V2\Schemas;
-use MageDevGroup\AdminScim\Model\Auth\BearerTokenAuthenticator;
-use MageDevGroup\AdminScim\Model\Discovery\DiscoveryProvider;
-use MageDevGroup\AdminScim\Model\Response\ScimResponse;
+use DmLab\AdminScim\Controller\V2\Schemas;
+use DmLab\AdminScim\Model\Auth\BearerTokenAuthenticator;
+use DmLab\AdminScim\Model\Discovery\DiscoveryProvider;
+use DmLab\AdminScim\Model\Response\ScimResponse;
 use Magento\Framework\App\Request\Http;
 use Magento\Framework\Controller\Result\Raw;
 use PHPUnit\Framework\MockObject\MockObject;
