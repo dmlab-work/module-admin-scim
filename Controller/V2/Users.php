@@ -1,22 +1,22 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Controller\V2;
+namespace DmLab\AdminScim\Controller\V2;
 
-use MageDevGroup\AdminScim\Api\RequestNormalizerInterface;
-use MageDevGroup\AdminScim\Controller\AbstractScim;
-use MageDevGroup\AdminScim\Exception\ScimException;
-use MageDevGroup\AdminScim\Model\Auth\BearerTokenAuthenticator;
-use MageDevGroup\AdminScim\Model\Discovery\DiscoveryProvider;
-use MageDevGroup\AdminScim\Model\Normalization\RequestNormalizerChain;
-use MageDevGroup\AdminScim\Model\Response\ListResponseBuilder;
-use MageDevGroup\AdminScim\Model\Response\ScimResponse;
-use MageDevGroup\AdminScim\Model\User\ScimUserMapper;
-use MageDevGroup\AdminScim\Model\User\ScimUserRepository;
-use MageDevGroup\AdminScim\Model\User\UserProvisioner;
+use DmLab\AdminScim\Api\RequestNormalizerInterface;
+use DmLab\AdminScim\Controller\AbstractScim;
+use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\Auth\BearerTokenAuthenticator;
+use DmLab\AdminScim\Model\Discovery\DiscoveryProvider;
+use DmLab\AdminScim\Model\Normalization\RequestNormalizerChain;
+use DmLab\AdminScim\Model\Response\ListResponseBuilder;
+use DmLab\AdminScim\Model\Response\ScimResponse;
+use DmLab\AdminScim\Model\User\ScimUserMapper;
+use DmLab\AdminScim\Model\User\ScimUserRepository;
+use DmLab\AdminScim\Model\User\UserProvisioner;
 use Magento\Framework\App\Request\Http;
 use Magento\Framework\Controller\ResultInterface;
 use Magento\Framework\Serialize\Serializer\Json;

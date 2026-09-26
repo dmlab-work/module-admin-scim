@@ -1,13 +1,13 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Test\Unit\Model\Response;
+namespace DmLab\AdminScim\Test\Unit\Model\Response;
 
-use MageDevGroup\AdminScim\Exception\ScimException;
-use MageDevGroup\AdminScim\Model\Response\ScimResponse;
+use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\Response\ScimResponse;
 use Magento\Framework\Controller\Result\Raw;
 use Magento\Framework\Controller\Result\RawFactory;
 use Magento\Framework\Serialize\Serializer\Json;

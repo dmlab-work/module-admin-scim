@@ -1,13 +1,13 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Test\Unit\Doubles;
+namespace DmLab\AdminScim\Test\Unit\Doubles;
 
 /**
- * Captures the HTTP status and JSON body a {@see \MageDevGroup\AdminScim\Model\Response\ScimResponse}
+ * Captures the HTTP status and JSON body a {@see \DmLab\AdminScim\Model\Response\ScimResponse}
  * writes into its `Raw` result, so a lifecycle test can assert the SCIM document
  * a controller returned. Populated by the `Raw` double built in {@see InMemoryScimTrait}.
  */

@@ -1,10 +1,10 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Api;
+namespace DmLab\AdminScim\Api;
 
 /**
  * Provider-quirk extension point: rewrite a non-compliant IdP request body into
@@ -12,7 +12,7 @@ namespace MageDevGroup\AdminScim\Api;
  *
  * The core is strict-RFC and ships no normalizer, so by default request bodies
  * pass through untouched. A provider plugin (`admin-scim-azure`, `admin-scim-okta`)
- * di-merges its normalizer into the {@see \MageDevGroup\AdminScim\Model\Normalization\RequestNormalizerChain}
+ * di-merges its normalizer into the {@see \DmLab\AdminScim\Model\Normalization\RequestNormalizerChain}
  * to absorb that IdP's deviations (Entra flat complex attrs, `value` in group-member
  * remove, ADD/REPLACE inconsistency) — the core never learns IdP specifics.
  *

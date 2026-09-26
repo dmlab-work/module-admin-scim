@@ -1,16 +1,16 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Model\Group;
+namespace DmLab\AdminScim\Model\Group;
 
-use MageDevGroup\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Exception\ScimException;
 
 /**
  * Read side of SCIM Group provisioning: fetch a single group by its SCIM `id`
- * (the `magedevgroup_scim_group.group_id`) and search the collection with the
+ * (the `dmlab_scim_group.group_id`) and search the collection with the
  * supported filter subset + pagination. The write side (create/patch/uniqueness,
  * membership, role sync) lives in {@see GroupProvisioner}; this class only loads.
  */
@@ -29,7 +29,7 @@ class ScimGroupRepository
     /**
      * Load a group by its SCIM `id`.
      *
-     * @param string $id the SCIM resource id (magedevgroup_scim_group.group_id)
+     * @param string $id the SCIM resource id (dmlab_scim_group.group_id)
      * @return ScimGroup the loaded group
      * @throws ScimException 404 when no group carries that id
      */

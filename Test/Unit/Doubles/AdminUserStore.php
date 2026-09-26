@@ -1,10 +1,10 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Test\Unit\Doubles;
+namespace DmLab\AdminScim\Test\Unit\Doubles;
 
 use Magento\Framework\Math\Random;
 use Magento\User\Model\ResourceModel\User as UserResource;

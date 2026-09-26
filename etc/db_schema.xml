@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <!--
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 -->
 <schema xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -12,10 +12,10 @@
              Nullable so locally created / SSO-only admins keep an empty value;
              unique so one SCIM resource maps to at most one admin (MySQL allows
              many NULLs). -->
-        <column xsi:type="varchar" name="magedevgroup_scim_external_id" nullable="true" length="255"
-                comment="MageDevGroup SCIM external identifier"/>
-        <constraint xsi:type="unique" referenceId="MAGEDEVGROUP_ADMIN_SCIM_EXTERNAL_ID">
-            <column name="magedevgroup_scim_external_id"/>
+        <column xsi:type="varchar" name="dmlab_scim_external_id" nullable="true" length="255"
+                comment="DmLab SCIM external identifier"/>
+        <constraint xsi:type="unique" referenceId="DMLAB_ADMIN_SCIM_EXTERNAL_ID">
+            <column name="dmlab_scim_external_id"/>
         </constraint>
     </table>
 
@@ -23,8 +23,8 @@
          `display_name` is what maps to a Magento ACL role via the configured
          group→role rules. Groups exist only to carry membership and drive role
          assignment — they are not Magento entities of their own. -->
-    <table name="magedevgroup_scim_group" resource="default" engine="innodb"
-           comment="MageDevGroup SCIM Groups">
+    <table name="dmlab_scim_group" resource="default" engine="innodb"
+           comment="DmLab SCIM Groups">
         <column xsi:type="int" name="group_id" unsigned="true" nullable="false" identity="true"
                 comment="SCIM group id"/>
         <column xsi:type="varchar" name="display_name" nullable="false" length="255"
@@ -34,10 +34,10 @@
         <constraint xsi:type="primary" referenceId="PRIMARY">
             <column name="group_id"/>
         </constraint>
-        <constraint xsi:type="unique" referenceId="MAGEDEVGROUP_SCIM_GROUP_DISPLAY_NAME">
+        <constraint xsi:type="unique" referenceId="DMLAB_SCIM_GROUP_DISPLAY_NAME">
             <column name="display_name"/>
         </constraint>
-        <constraint xsi:type="unique" referenceId="MAGEDEVGROUP_SCIM_GROUP_EXTERNAL_ID">
+        <constraint xsi:type="unique" referenceId="DMLAB_SCIM_GROUP_EXTERNAL_ID">
             <column name="external_id"/>
         </constraint>
     </table>
@@ -45,8 +45,8 @@
     <!-- Membership: which admin users belong to a SCIM group. A member add/remove
          re-derives the admin's ACL role from every group it now belongs to. Both
          sides cascade on delete so a removed group or admin drops its rows. -->
-    <table name="magedevgroup_scim_group_member" resource="default" engine="innodb"
-           comment="MageDevGroup SCIM Group membership">
+    <table name="dmlab_scim_group_member" resource="default" engine="innodb"
+           comment="DmLab SCIM Group membership">
         <column xsi:type="int" name="membership_id" unsigned="true" nullable="false" identity="true"
                 comment="Membership row id"/>
         <column xsi:type="int" name="group_id" unsigned="true" nullable="false"
@@ -56,15 +56,15 @@
         <constraint xsi:type="primary" referenceId="PRIMARY">
             <column name="membership_id"/>
         </constraint>
-        <constraint xsi:type="foreign" referenceId="MAGEDEVGROUP_SCIM_MEMBER_GROUP_ID"
-                    table="magedevgroup_scim_group_member" column="group_id"
-                    referenceTable="magedevgroup_scim_group" referenceColumn="group_id"
+        <constraint xsi:type="foreign" referenceId="DMLAB_SCIM_MEMBER_GROUP_ID"
+                    table="dmlab_scim_group_member" column="group_id"
+                    referenceTable="dmlab_scim_group" referenceColumn="group_id"
                     onDelete="CASCADE"/>
-        <constraint xsi:type="foreign" referenceId="MAGEDEVGROUP_SCIM_MEMBER_USER_ID"
-                    table="magedevgroup_scim_group_member" column="user_id"
+        <constraint xsi:type="foreign" referenceId="DMLAB_SCIM_MEMBER_USER_ID"
+                    table="dmlab_scim_group_member" column="user_id"
                     referenceTable="admin_user" referenceColumn="user_id"
                     onDelete="CASCADE"/>
-        <constraint xsi:type="unique" referenceId="MAGEDEVGROUP_SCIM_MEMBER_GROUP_USER">
+        <constraint xsi:type="unique" referenceId="DMLAB_SCIM_MEMBER_GROUP_USER">
             <column name="group_id"/>
             <column name="user_id"/>
         </constraint>

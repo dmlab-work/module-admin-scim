@@ -1,16 +1,16 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Test\Unit\Model\Group;
+namespace DmLab\AdminScim\Test\Unit\Model\Group;
 
-use MageDevGroup\AdminScim\Exception\ScimException;
-use MageDevGroup\AdminScim\Model\Group\GroupFilterParser;
-use MageDevGroup\AdminScim\Model\Group\GroupResource;
-use MageDevGroup\AdminScim\Model\Group\ScimGroup;
-use MageDevGroup\AdminScim\Model\Group\ScimGroupRepository;
+use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\Group\GroupFilterParser;
+use DmLab\AdminScim\Model\Group\GroupResource;
+use DmLab\AdminScim\Model\Group\ScimGroup;
+use DmLab\AdminScim\Model\Group\ScimGroupRepository;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 

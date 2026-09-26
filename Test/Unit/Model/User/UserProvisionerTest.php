@@ -1,16 +1,16 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Test\Unit\Model\User;
+namespace DmLab\AdminScim\Test\Unit\Model\User;
 
-use MageDevGroup\AdminScim\Exception\ScimException;
-use MageDevGroup\AdminScim\Model\User\ScimUserMapper;
-use MageDevGroup\AdminScim\Model\User\ScimUserPatcher;
-use MageDevGroup\AdminScim\Model\User\ScimUserRepository;
-use MageDevGroup\AdminScim\Model\User\UserProvisioner;
+use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\User\ScimUserMapper;
+use DmLab\AdminScim\Model\User\ScimUserPatcher;
+use DmLab\AdminScim\Model\User\ScimUserRepository;
+use DmLab\AdminScim\Model\User\UserProvisioner;
 use Magento\Framework\Exception\AlreadyExistsException;
 use Magento\Framework\Math\Random;
 use Magento\Framework\Phrase;

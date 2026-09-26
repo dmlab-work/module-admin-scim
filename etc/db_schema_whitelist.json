@@ -1,13 +1,13 @@
 {
     "admin_user": {
         "column": {
-            "magedevgroup_scim_external_id": true
+            "dmlab_scim_external_id": true
         },
         "constraint": {
-            "MAGEDEVGROUP_ADMIN_SCIM_EXTERNAL_ID": true
+            "DMLAB_ADMIN_SCIM_EXTERNAL_ID": true
         }
     },
-    "magedevgroup_scim_group": {
+    "dmlab_scim_group": {
         "column": {
             "group_id": true,
             "display_name": true,
@@ -15,11 +15,11 @@
         },
         "constraint": {
             "PRIMARY": true,
-            "MAGEDEVGROUP_SCIM_GROUP_DISPLAY_NAME": true,
-            "MAGEDEVGROUP_SCIM_GROUP_EXTERNAL_ID": true
+            "DMLAB_SCIM_GROUP_DISPLAY_NAME": true,
+            "DMLAB_SCIM_GROUP_EXTERNAL_ID": true
         }
     },
-    "magedevgroup_scim_group_member": {
+    "dmlab_scim_group_member": {
         "column": {
             "membership_id": true,
             "group_id": true,
@@ -27,9 +27,9 @@
         },
         "constraint": {
             "PRIMARY": true,
-            "MAGEDEVGROUP_SCIM_MEMBER_GROUP_ID": true,
-            "MAGEDEVGROUP_SCIM_MEMBER_USER_ID": true,
-            "MAGEDEVGROUP_SCIM_MEMBER_GROUP_USER": true
+            "DMLAB_SCIM_MEMBER_GROUP_ID": true,
+            "DMLAB_SCIM_MEMBER_USER_ID": true,
+            "DMLAB_SCIM_MEMBER_GROUP_USER": true
         }
     }
 }

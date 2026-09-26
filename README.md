@@ -1,10 +1,10 @@
-# MageDevGroup_AdminScim
+# DmLab_AdminScim
 
 > SCIM 2.0 provisioning server for Magento 2 admin users.
 
 ![License](https://img.shields.io/badge/license-OSL--3.0-green) ![Magento](https://img.shields.io/badge/Magento-2.4-orange) ![PHP](https://img.shields.io/badge/PHP-8.3--8.5-blue) ![Version](https://img.shields.io/badge/version-0.0.1-lightgrey)
 
-`MageDevGroup_AdminScim` turns Magento into a SCIM 2.0 (RFC 7643/7644) provisioning
+`DmLab_AdminScim` turns Magento into a SCIM 2.0 (RFC 7643/7644) provisioning
 server, so an identity provider such as Okta or Entra can create, update, and
 deactivate Magento admin users automatically — without anyone logging in. It
 complements SSO login: where JIT provisioning acts at login time, SCIM adds
@@ -42,7 +42,7 @@ schema (`urn:ietf:params:scim:api:messages:2.0:Error`) with the correct status.
 
 1. Install the module and run
    `bin/magento setup:upgrade`.
-2. In the admin panel go to **Stores → Configuration → MageDevGroup → Admin SCIM**.
+2. In the admin panel go to **Stores → Configuration → DMLab → Admin SCIM**.
 3. **Enable Admin SCIM** = *Yes*. The endpoint is disabled by default.
 4. **Bearer Token** — set a long random value. It is stored encrypted and is the
    credential the IdP presents. Point your IdP's SCIM app at the base URL above and
@@ -75,7 +75,7 @@ attrs in PATCH, `value` in group-member remove, ADD/REPLACE inconsistency). Thos
 quirks are **not** in the core; a per-IdP plugin (`admin-scim-okta`,
 `admin-scim-azure`) absorbs them via a normalization seam:
 
-- The plugin implements `MageDevGroup\AdminScim\Api\RequestNormalizerInterface` —
+- The plugin implements `DmLab\AdminScim\Api\RequestNormalizerInterface` —
   a pure, total `normalize(resourceType, operation, payload)` that rewrites the
   decoded body toward RFC shape and returns unchanged payloads it does not own.
 - It `di`-merges the normalizer into `RequestNormalizerChain` (see `etc/di.xml`),
@@ -105,4 +105,4 @@ Running against a real IdP therefore needs the matching provider plugin.
 
 ## License
 
-[OSL-3.0](LICENSE) © MageDevGroup. Commercial licensing and support: <https://magedevgroup.com>.
+[OSL-3.0](LICENSE) © DMLab. Commercial licensing and support: <https://dmlab.work>.

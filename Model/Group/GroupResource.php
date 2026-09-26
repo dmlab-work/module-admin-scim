@@ -1,15 +1,15 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Model\Group;
+namespace DmLab\AdminScim\Model\Group;
 
 use Magento\Framework\App\ResourceConnection;
 
 /**
- * Persistence for the `magedevgroup_scim_group` table.
+ * Persistence for the `dmlab_scim_group` table.
  *
  * Direct-connection CRUD over the group row (`display_name`, `external_id`),
  * translating rows to/from the {@see ScimGroup} DTO, plus the filtered/paginated
@@ -17,7 +17,7 @@ use Magento\Framework\App\ResourceConnection;
  */
 class GroupResource
 {
-    private const TABLE = 'magedevgroup_scim_group';
+    private const TABLE = 'dmlab_scim_group';
 
     /**
      * @param ResourceConnection $resource

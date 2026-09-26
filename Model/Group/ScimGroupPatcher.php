@@ -1,12 +1,12 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Model\Group;
+namespace DmLab\AdminScim\Model\Group;
 
-use MageDevGroup\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Exception\ScimException;
 
 /**
  * Applies a SCIM PATCH `PatchOp` (RFC 7644 §3.5.2) to a loaded group and its

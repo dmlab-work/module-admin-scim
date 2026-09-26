@@ -1,12 +1,12 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Test\Unit\Model\Group;
+namespace DmLab\AdminScim\Test\Unit\Model\Group;
 
-use MageDevGroup\AdminScim\Model\Group\MemberResource;
+use DmLab\AdminScim\Model\Group\MemberResource;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Adapter\AdapterInterface;
 use Magento\Framework\DB\Select;
@@ -117,7 +117,7 @@ class MemberResourceTest extends TestCase
     public function testRemoveMembersDeletes(): void
     {
         $this->connection->expects(self::once())->method('delete')
-            ->with('magedevgroup_scim_group_member', self::anything());
+            ->with('dmlab_scim_group_member', self::anything());
 
         $this->resource->removeMembers(1, [5]);
     }

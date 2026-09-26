@@ -1,10 +1,10 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Model\Discovery;
+namespace DmLab\AdminScim\Model\Discovery;
 
 /**
  * Produces the three SCIM discovery documents (RFC 7643 §5/§6, RFC 7644 §4):

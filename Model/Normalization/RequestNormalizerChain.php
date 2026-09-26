@@ -1,12 +1,12 @@
 <?php
 /**
- * Copyright © MageDevGroup. All rights reserved.
+ * Copyright © DMLab. All rights reserved.
  */
 declare(strict_types=1);
 
-namespace MageDevGroup\AdminScim\Model\Normalization;
+namespace DmLab\AdminScim\Model\Normalization;
 
-use MageDevGroup\AdminScim\Api\RequestNormalizerInterface;
+use DmLab\AdminScim\Api\RequestNormalizerInterface;
 
 /**
  * Open/closed seam for provider quirks: the di-merged pipeline of request
