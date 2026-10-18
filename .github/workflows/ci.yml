@@ -17,7 +17,7 @@ jobs:
     name: Lint
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: shivammathur/setup-php@v2
         with:
@@ -47,7 +47,7 @@ jobs:
       matrix:
         php: ['8.3', '8.4', '8.5']
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - uses: shivammathur/setup-php@v2
         with:
@@ -62,12 +62,12 @@ jobs:
           composer config --no-plugins allow-plugins.magento/magento-composer-installer false
           composer config --no-plugins allow-plugins.magento/composer-dependency-version-audit-plugin false
 
-      - uses: ramsey/composer-install@v3
+      - uses: ramsey/composer-install@v4
 
       - name: PHPUnit
         run: vendor/bin/phpunit -c Test/Unit/phpunit.xml ${{ matrix.php == '8.4' && '--coverage-clover coverage.xml' || '' }}
 
-      - uses: codecov/codecov-action@v5
+      - uses: codecov/codecov-action@v7
         if: matrix.php == '8.4'
         with:
           files: coverage.xml
