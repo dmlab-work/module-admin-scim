@@ -1,12 +1,14 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
 namespace DmLab\AdminScim\Test\Unit\Model\Group;
 
 use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\Audit\AuditLogger;
 use DmLab\AdminScim\Model\Group\GroupProvisioner;
 use DmLab\AdminScim\Model\Group\GroupResource;
 use DmLab\AdminScim\Model\Group\GroupRoleSynchronizer;
@@ -15,8 +17,11 @@ use DmLab\AdminScim\Model\Group\ScimGroup;
 use DmLab\AdminScim\Model\Group\ScimGroupMapper;
 use DmLab\AdminScim\Model\Group\ScimGroupPatcher;
 use DmLab\AdminScim\Model\Group\ScimGroupRepository;
+use DmLab\AdminScim\Model\WriteLock;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Adapter\AdapterInterface;
+use Magento\Framework\DB\Adapter\DuplicateException;
+use Magento\Framework\Lock\LockManagerInterface;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
@@ -52,18 +57,32 @@ class GroupProvisionerTest extends TestCase
         $this->memberResource = $this->createMock(MemberResource::class);
         $this->roleSynchronizer = $this->createMock(GroupRoleSynchronizer::class);
 
-        $adapter = $this->createStub(AdapterInterface::class);
+        $this->provisioner = $this->createProvisioner($this->createStub(AdapterInterface::class));
+    }
+
+    /** A provisioner over the shared collaborators, the given DB adapter, audit logger and lock. */
+    private function createProvisioner(
+        AdapterInterface $adapter,
+        ?AuditLogger $auditLogger = null,
+        ?LockManagerInterface $lockManager = null
+    ): GroupProvisioner {
         $resource = $this->createStub(ResourceConnection::class);
         $resource->method('getConnection')->willReturn($adapter);
+        if ($lockManager === null) {
+            $lockManager = $this->createStub(LockManagerInterface::class);
+            $lockManager->method('lock')->willReturn(true);
+        }
 
-        $this->provisioner = new GroupProvisioner(
+        return new GroupProvisioner(
             $this->mapper,
             $this->groupResource,
             $this->repository,
             $this->patcher,
             $this->memberResource,
             $this->roleSynchronizer,
-            $resource
+            $resource,
+            $auditLogger ?? $this->createStub(AuditLogger::class),
+            new WriteLock($lockManager)
         );
     }
 
@@ -173,6 +192,93 @@ class GroupProvisionerTest extends TestCase
         self::assertSame($group, $this->provisioner->patch('10', $body));
     }
 
+    public function testPatchValidatesOnlyAddedMembers(): void
+    {
+        $group = new ScimGroup(10, 'Admins');
+        $this->repository->method('getById')->willReturn($group);
+        // 6 is a stale row naming an unmanaged admin; the patch adds 8.
+        $this->memberResource->method('getUserIds')->willReturn([5, 6]);
+        $this->patcher->method('apply')->willReturnCallback(
+            static function (ScimGroup $g, array &$members, array $body): void {
+                $members = [5, 6, 8];
+            }
+        );
+        $this->groupResource->expects(self::once())->method('findConflictId')->willReturn(null);
+        $this->memberResource->expects(self::once())->method('findMissingUserIds')
+            ->with([2 => 8])->willReturn([]);
+        $this->memberResource->expects(self::once())->method('setMembers')->with(10, [5, 6, 8]);
+        $this->roleSynchronizer->expects(self::once())->method('syncUsers')->with([5, 6, 5, 6, 8]);
+
+        $this->provisioner->patch('10', ['Operations' => [['op' => 'add']]]);
+    }
+
+    public function testPatchRejectsUnknownAddedMemberWithNoWrite(): void
+    {
+        $group = new ScimGroup(10, 'Admins');
+        $this->repository->method('getById')->willReturn($group);
+        $this->memberResource->method('getUserIds')->willReturn([5]);
+        $this->patcher->method('apply')->willReturnCallback(
+            static function (ScimGroup $g, array &$members, array $body): void {
+                $members = [5, 999];
+            }
+        );
+        $this->memberResource->method('findMissingUserIds')->willReturn([999]);
+        $this->groupResource->expects(self::never())->method('save');
+        $this->memberResource->expects(self::never())->method('setMembers');
+        $this->roleSynchronizer->expects(self::never())->method('syncUsers');
+
+        try {
+            $this->provisioner->patch('10', ['Operations' => [['op' => 'add']]]);
+            self::fail('Expected ScimException');
+        } catch (ScimException $e) {
+            self::assertSame(400, $e->getHttpStatus());
+            self::assertSame('invalidValue', $e->getScimType());
+        }
+    }
+
+    public function testPatchMapsDuplicateKeyToConflictAndRollsBack(): void
+    {
+        $adapter = $this->createMock(AdapterInterface::class);
+        $adapter->expects(self::once())->method('beginTransaction');
+        $adapter->expects(self::once())->method('rollBack');
+        $adapter->expects(self::never())->method('commit');
+        $provisioner = $this->createProvisioner($adapter);
+
+        $this->repository->method('getById')->willReturn(new ScimGroup(10, 'Admins'));
+        $this->memberResource->expects(self::once())->method('getUserIds')->willReturn([]);
+        $this->groupResource->method('findConflictId')->willReturn(null);
+        $this->groupResource->expects(self::once())->method('save')->willThrowException(new DuplicateException('dup'));
+        $this->roleSynchronizer->expects(self::never())->method('syncUsers');
+
+        try {
+            $provisioner->patch('10', ['Operations' => [['op' => 'replace']]]);
+            self::fail('Expected ScimException');
+        } catch (ScimException $e) {
+            self::assertSame(409, $e->getHttpStatus());
+        }
+    }
+
+    public function testReplaceRollsBackWhenSyncFails(): void
+    {
+        $adapter = $this->createMock(AdapterInterface::class);
+        $adapter->expects(self::once())->method('rollBack');
+        $adapter->expects(self::never())->method('commit');
+        $provisioner = $this->createProvisioner($adapter);
+
+        $this->repository->method('getById')->willReturn(new ScimGroup(10, 'Admins'));
+        $this->mapperReturns('Admins', null, [5]);
+        $this->groupResource->expects(self::once())->method('save');
+        $this->groupResource->method('findConflictId')->willReturn(null);
+        $this->memberResource->method('findMissingUserIds')->willReturn([]);
+        $this->memberResource->expects(self::once())->method('setMembers')->with(10, [5]);
+        $this->memberResource->method('getUserIds')->willReturn([]);
+        $this->roleSynchronizer->expects(self::once())->method('syncUsers')
+            ->willThrowException(new \RuntimeException('boom'));
+
+        $this->expectException(\RuntimeException::class);
+        $provisioner->replace('10', ['displayName' => 'Admins']);
+    }
+
     public function testPatchRechecksDisplayNameUniqueness(): void
     {
         $group = new ScimGroup(10, 'Renamed');
@@ -204,5 +310,380 @@ class GroupProvisionerTest extends TestCase
 
         $this->expectException(ScimException::class);
         $this->provisioner->patch('999', ['Operations' => [['op' => 'replace']]]);
+    }
+
+    public function testReplaceSwapsMembersAndSyncsUnion(): void
+    {
+        $group = new ScimGroup(10, 'Admins', 'grp-1');
+        $this->repository->method('getById')->willReturn($group);
+        $this->mapperReturns('Ops', 'grp-2', [5, 8]);
+        $this->memberResource->method('getUserIds')->with(10)->willReturn([5, 6]);
+        $this->memberResource->method('findMissingUserIds')->willReturn([]);
+        $this->groupResource->expects(self::exactly(2))->method('findConflictId')
+            ->willReturnCallback(static function (string $field, string $value, ?int $excludeId): ?int {
+                self::assertSame(10, $excludeId);
+
+                return null;
+            });
+        $this->groupResource->expects(self::once())->method('save')->with($group);
+
+        $this->memberResource->expects(self::once())->method('setMembers')->with(10, [5, 8]);
+        $this->roleSynchronizer->expects(self::once())->method('syncUsers')->with([5, 6, 5, 8]);
+
+        $result = $this->provisioner->replace('10', ['displayName' => 'Ops']);
+
+        self::assertSame($group, $result);
+        self::assertSame('Ops', $result->displayName);
+        self::assertSame('grp-2', $result->externalId);
+    }
+
+    public function testReplaceClearsExternalIdWhenAbsent(): void
+    {
+        $group = new ScimGroup(10, 'Admins', 'grp-1');
+        $this->repository->method('getById')->willReturn($group);
+        $this->mapperReturns('Admins', null, []);
+        $this->memberResource->method('getUserIds')->willReturn([]);
+        $this->memberResource->method('findMissingUserIds')->willReturn([]);
+        $this->groupResource->expects(self::once())->method('findConflictId')
+            ->with('display_name', 'Admins', 10)->willReturn(null);
+        $this->groupResource->expects(self::once())->method('save');
+        $this->memberResource->expects(self::once())->method('setMembers')->with(10, []);
+        $this->roleSynchronizer->expects(self::once())->method('syncUsers')->with([]);
+
+        self::assertNull($this->provisioner->replace('10', ['displayName' => 'Admins'])->externalId);
+    }
+
+    public function testReplaceThrowsConflictOnDisplayNameClash(): void
+    {
+        $this->repository->method('getById')->willReturn(new ScimGroup(10, 'Admins'));
+        $this->mapperReturns('Ops', null, []);
+        $this->groupResource->method('findConflictId')->with('display_name', 'Ops', 10)->willReturn(42);
+        $this->groupResource->expects(self::never())->method('save');
+        $this->memberResource->expects(self::never())->method('setMembers');
+        $this->roleSynchronizer->expects(self::never())->method('syncUsers');
+
+        try {
+            $this->provisioner->replace('10', ['displayName' => 'Ops']);
+            self::fail('Expected ScimException');
+        } catch (ScimException $e) {
+            self::assertSame(409, $e->getHttpStatus());
+            self::assertSame('uniqueness', $e->getScimType());
+        }
+    }
+
+    public function testReplaceRejectsUnknownMember(): void
+    {
+        $this->repository->method('getById')->willReturn(new ScimGroup(10, 'Admins'));
+        $this->mapperReturns('Admins', null, [5, 999]);
+        $this->groupResource->method('findConflictId')->willReturn(null);
+        $this->memberResource->method('findMissingUserIds')->with([5, 999])->willReturn([999]);
+        $this->groupResource->expects(self::never())->method('save');
+        $this->memberResource->expects(self::never())->method('setMembers');
+        $this->roleSynchronizer->expects(self::never())->method('syncUsers');
+
+        try {
+            $this->provisioner->replace('10', ['displayName' => 'Admins']);
+            self::fail('Expected ScimException');
+        } catch (ScimException $e) {
+            self::assertSame(400, $e->getHttpStatus());
+            self::assertSame('invalidValue', $e->getScimType());
+        }
+    }
+
+    public function testReplaceMapsDuplicateKeyToConflictAndRollsBack(): void
+    {
+        $adapter = $this->createMock(AdapterInterface::class);
+        $adapter->expects(self::once())->method('beginTransaction');
+        $adapter->expects(self::once())->method('rollBack');
+        $adapter->expects(self::never())->method('commit');
+        $provisioner = $this->createProvisioner($adapter);
+
+        $this->repository->method('getById')->willReturn(new ScimGroup(10, 'Admins'));
+        $this->mapperReturns('Ops', null, []);
+        $this->memberResource->method('getUserIds')->willReturn([]);
+        $this->memberResource->method('findMissingUserIds')->willReturn([]);
+        $this->groupResource->method('findConflictId')->willReturn(null);
+        $this->groupResource->expects(self::once())->method('save')
+            ->willThrowException(new DuplicateException('dup'));
+        $this->memberResource->expects(self::never())->method('setMembers');
+        $this->roleSynchronizer->expects(self::never())->method('syncUsers');
+
+        try {
+            $provisioner->replace('10', ['displayName' => 'Ops']);
+            self::fail('Expected ScimException');
+        } catch (ScimException $e) {
+            self::assertSame(409, $e->getHttpStatus());
+        }
+    }
+
+    public function testReplacePropagatesNotFound(): void
+    {
+        $this->repository->method('getById')
+            ->willThrowException(ScimException::notFound('Group "999" not found.'));
+        $this->groupResource->expects(self::never())->method('save');
+        $this->memberResource->expects(self::never())->method('setMembers');
+        $this->roleSynchronizer->expects(self::never())->method('syncUsers');
+
+        $this->expectException(ScimException::class);
+        $this->provisioner->replace('999', ['displayName' => 'Ops']);
+    }
+
+    public function testDeleteRemovesMembershipAndGroupThenSyncsFormerMembers(): void
+    {
+        $adapter = $this->createMock(AdapterInterface::class);
+        $adapter->expects(self::once())->method('beginTransaction');
+        $adapter->expects(self::once())->method('commit');
+        $adapter->expects(self::never())->method('rollBack');
+        $provisioner = $this->createProvisioner($adapter);
+
+        $this->repository->method('getById')->willReturn(new ScimGroup(10, 'Admins'));
+        $this->memberResource->method('getUserIds')->with(10)->willReturn([5, 6]);
+
+        $calls = [];
+        $this->memberResource->expects(self::once())->method('removeAllForGroup')->with(10)
+            ->willReturnCallback(static function () use (&$calls): void {
+                $calls[] = 'members';
+            });
+        $this->groupResource->expects(self::once())->method('delete')->with(10)
+            ->willReturnCallback(static function () use (&$calls): void {
+                $calls[] = 'group';
+            });
+        $this->roleSynchronizer->expects(self::once())->method('syncUsers')->with([5, 6])
+            ->willReturnCallback(static function () use (&$calls): array {
+                $calls[] = 'sync';
+                return [];
+            });
+
+        $provisioner->delete('10');
+
+        self::assertSame(['members', 'group', 'sync'], $calls);
+    }
+
+    public function testDeleteRollsBackWhenSyncFails(): void
+    {
+        $adapter = $this->createMock(AdapterInterface::class);
+        $adapter->expects(self::once())->method('beginTransaction');
+        $adapter->expects(self::once())->method('rollBack');
+        $adapter->expects(self::never())->method('commit');
+        $provisioner = $this->createProvisioner($adapter);
+
+        $this->repository->method('getById')->willReturn(new ScimGroup(10, 'Admins'));
+        $this->memberResource->method('getUserIds')->willReturn([5]);
+        $this->memberResource->expects(self::once())->method('removeAllForGroup');
+        $this->groupResource->expects(self::once())->method('delete');
+        $this->roleSynchronizer->expects(self::once())->method('syncUsers')
+            ->willThrowException(new \RuntimeException('boom'));
+
+        $this->expectException(\RuntimeException::class);
+        $provisioner->delete('10');
+    }
+
+    public function testDeletePropagatesNotFound(): void
+    {
+        $this->repository->method('getById')
+            ->willThrowException(ScimException::notFound('Group "999" not found.'));
+        $this->memberResource->expects(self::never())->method('removeAllForGroup');
+        $this->groupResource->expects(self::never())->method('delete');
+        $this->roleSynchronizer->expects(self::never())->method('syncUsers');
+
+        try {
+            $this->provisioner->delete('999');
+            self::fail('Expected ScimException');
+        } catch (ScimException $e) {
+            self::assertSame(404, $e->getHttpStatus());
+        }
+    }
+
+    /** A provisioner whose audit logger expects exactly one event with the given context. */
+    private function provisionerExpectingAudit(string $event, array $context): GroupProvisioner
+    {
+        $auditLogger = $this->createMock(AuditLogger::class);
+        $auditLogger->expects(self::once())->method('log')->with($event, $context);
+
+        return $this->createProvisioner($this->createStub(AdapterInterface::class), $auditLogger);
+    }
+
+    public function testCreateLogsGroupCreateWithAddedMembers(): void
+    {
+        $this->mapperReturns('Admins', null, [5, 7]);
+        $this->groupResource->expects(self::once())->method('findConflictId')->willReturn(null);
+        $this->memberResource->method('findMissingUserIds')->willReturn([]);
+        $this->memberResource->expects(self::once())->method('setMembers')->with(10, [5, 7]);
+        $this->roleSynchronizer->expects(self::once())->method('syncUsers')->with([5, 7]);
+        $this->saveAssignsId(10);
+
+        $this->provisionerExpectingAudit('group.create', [
+            'group_id' => 10,
+            'displayName' => 'Admins',
+            'members_added' => [5, 7],
+            'members_removed' => [],
+        ])->create(['displayName' => 'Admins']);
+    }
+
+    public function testPatchLogsGroupPatchWithMemberDiff(): void
+    {
+        $this->repository->method('getById')->willReturn(new ScimGroup(10, 'Admins'));
+        $this->memberResource->method('getUserIds')->willReturn([5, 6]);
+        $this->memberResource->method('findMissingUserIds')->willReturn([]);
+        $this->patcher->method('apply')->willReturnCallback(
+            static function (ScimGroup $g, array &$members): void {
+                $members = [5, 8];
+            }
+        );
+        $this->groupResource->method('findConflictId')->willReturn(null);
+        $this->groupResource->expects(self::once())->method('save');
+        $this->memberResource->expects(self::once())->method('setMembers')->with(10, [5, 8]);
+        $this->roleSynchronizer->expects(self::once())->method('syncUsers')->with([5, 6, 5, 8]);
+
+        $this->provisionerExpectingAudit('group.patch', [
+            'group_id' => 10,
+            'displayName' => 'Admins',
+            'members_added' => [8],
+            'members_removed' => [6],
+        ])->patch('10', ['Operations' => []]);
+    }
+
+    public function testReplaceLogsGroupReplaceWithMemberDiff(): void
+    {
+        $this->repository->method('getById')->willReturn(new ScimGroup(10, 'Admins'));
+        $this->mapperReturns('Ops', null, [5, 8]);
+        $this->memberResource->method('getUserIds')->willReturn([5, 6]);
+        $this->memberResource->method('findMissingUserIds')->willReturn([]);
+        $this->groupResource->method('findConflictId')->willReturn(null);
+        $this->groupResource->expects(self::once())->method('save');
+        $this->memberResource->expects(self::once())->method('setMembers')->with(10, [5, 8]);
+        $this->roleSynchronizer->expects(self::once())->method('syncUsers')->with([5, 6, 5, 8]);
+
+        $this->provisionerExpectingAudit('group.replace', [
+            'group_id' => 10,
+            'displayName' => 'Ops',
+            'members_added' => [8],
+            'members_removed' => [6],
+        ])->replace('10', ['displayName' => 'Ops']);
+    }
+
+    public function testDeleteLogsGroupDeleteWithRemovedMembers(): void
+    {
+        $this->repository->method('getById')->willReturn(new ScimGroup(10, 'Admins'));
+        $this->memberResource->method('getUserIds')->willReturn([5, 6]);
+        $this->memberResource->expects(self::once())->method('removeAllForGroup')->with(10);
+        $this->groupResource->expects(self::once())->method('delete')->with(10);
+        $this->roleSynchronizer->expects(self::once())->method('syncUsers')->with([5, 6]);
+
+        $this->provisionerExpectingAudit('group.delete', [
+            'group_id' => 10,
+            'displayName' => 'Admins',
+            'members_added' => [],
+            'members_removed' => [5, 6],
+        ])->delete('10');
+    }
+
+    public function testRolledBackDeleteLogsNothing(): void
+    {
+        $this->repository->method('getById')->willReturn(new ScimGroup(10, 'Admins'));
+        $this->memberResource->method('getUserIds')->willReturn([5]);
+        $this->memberResource->expects(self::once())->method('removeAllForGroup')->with(10);
+        $this->groupResource->expects(self::once())->method('delete')->with(10);
+        $this->roleSynchronizer->expects(self::once())->method('syncUsers')
+            ->willThrowException(new \RuntimeException('boom'));
+        $auditLogger = $this->createMock(AuditLogger::class);
+        $auditLogger->expects(self::never())->method('log');
+
+        $this->expectException(\RuntimeException::class);
+
+        $this->createProvisioner($this->createStub(AdapterInterface::class), $auditLogger)->delete('10');
+    }
+
+    public function testDeleteReadsMembershipOnlyAfterTakingTheLock(): void
+    {
+        $calls = [];
+        $lockManager = $this->createMock(LockManagerInterface::class);
+        $lockManager->expects(self::once())->method('lock')
+            ->willReturnCallback(static function () use (&$calls): bool {
+                $calls[] = 'lock';
+                return true;
+            });
+        $lockManager->expects(self::once())->method('unlock')
+            ->willReturnCallback(static function () use (&$calls): bool {
+                $calls[] = 'unlock';
+                return true;
+            });
+        $this->repository->method('getById')->willReturn(new ScimGroup(10, 'Admins'));
+        $this->memberResource->expects(self::once())->method('getUserIds')
+            ->willReturnCallback(static function () use (&$calls): array {
+                $calls[] = 'read';
+                return [5];
+            });
+        $this->groupResource->expects(self::once())->method('delete')->with(10);
+        $this->roleSynchronizer->expects(self::once())->method('syncUsers')->with([5]);
+
+        $this->createProvisioner($this->createStub(AdapterInterface::class), null, $lockManager)->delete('10');
+
+        self::assertSame(['lock', 'read', 'unlock'], $calls);
+    }
+
+    public function testPatchIsRejectedWithoutTheLock(): void
+    {
+        $lockManager = $this->createStub(LockManagerInterface::class);
+        $lockManager->method('lock')->willReturn(false);
+        $this->memberResource->expects(self::never())->method('getUserIds');
+        $this->memberResource->expects(self::never())->method('setMembers');
+        $this->groupResource->expects(self::never())->method('save');
+        $this->roleSynchronizer->expects(self::never())->method('syncUsers');
+
+        try {
+            $this->createProvisioner($this->createStub(AdapterInterface::class), null, $lockManager)
+                ->patch('10', ['Operations' => []]);
+            self::fail('Expected ScimException');
+        } catch (ScimException $e) {
+            self::assertSame(500, $e->getHttpStatus());
+        }
+    }
+
+    public function testRoleChangesAreLoggedAfterCommit(): void
+    {
+        $calls = [];
+        $adapter = $this->createStub(AdapterInterface::class);
+        $adapter->method('commit')->willReturnCallback(static function () use (&$calls, $adapter): AdapterInterface {
+            $calls[] = 'commit';
+            return $adapter;
+        });
+        $change = ['user_id' => 5, 'userName' => 'jdoe', 'from' => 2, 'to' => null];
+        $this->repository->method('getById')->willReturn(new ScimGroup(10, 'Admins'));
+        $this->memberResource->method('getUserIds')->willReturn([5]);
+        $this->memberResource->expects(self::once())->method('removeAllForGroup')->with(10);
+        $this->groupResource->expects(self::once())->method('delete')->with(10);
+        $this->roleSynchronizer->expects(self::once())->method('syncUsers')->willReturn([$change]);
+        $auditLogger = $this->createMock(AuditLogger::class);
+        $auditLogger->expects(self::exactly(2))->method('log')->willReturnCallback(
+            static function (string $event, array $context) use (&$calls, $change): void {
+                $calls[] = $event;
+                if ($event === 'role.change') {
+                    self::assertSame($change, $context);
+                }
+            }
+        );
+
+        $this->createProvisioner($adapter, $auditLogger)->delete('10');
+
+        self::assertSame(['commit', 'group.delete', 'role.change'], $calls);
+    }
+
+    public function testRolledBackPatchLogsNoRoleChange(): void
+    {
+        $this->repository->method('getById')->willReturn(new ScimGroup(10, 'Admins'));
+        $this->memberResource->method('getUserIds')->willReturn([5, 6]);
+        $this->memberResource->method('findMissingUserIds')->willReturn([]);
+        $this->groupResource->method('findConflictId')->willReturn(null);
+        $this->groupResource->expects(self::once())->method('save');
+        $this->memberResource->expects(self::once())->method('setMembers')->with(10, [5, 6]);
+        $this->roleSynchronizer->expects(self::once())->method('syncUsers')
+            ->willThrowException(new \RuntimeException('boom'));
+        $auditLogger = $this->createMock(AuditLogger::class);
+        $auditLogger->expects(self::never())->method('log');
+
+        $this->expectException(\RuntimeException::class);
+        $this->createProvisioner($this->createStub(AdapterInterface::class), $auditLogger)
+            ->patch('10', ['Operations' => []]);
     }
 }

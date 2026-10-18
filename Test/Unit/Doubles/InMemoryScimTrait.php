@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -8,12 +9,14 @@ namespace DmLab\AdminScim\Test\Unit\Doubles;
 
 use DmLab\AdminScim\Model\Discovery\EndpointUrlBuilder;
 use DmLab\AdminScim\Model\Response\ScimResponse;
+use DmLab\AdminScim\Model\WriteLock;
 use Magento\Framework\App\Request\Http;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\Controller\Result\Raw;
 use Magento\Framework\Controller\Result\RawFactory;
 use Magento\Framework\DB\Adapter\AdapterInterface;
 use Magento\Framework\DB\Select;
+use Magento\Framework\Lock\LockManagerInterface;
 use Magento\Framework\Math\Random;
 use Magento\Framework\Serialize\Serializer\Json;
 use Magento\Store\Model\Store;
@@ -32,6 +35,17 @@ use Magento\User\Model\UserFactory;
  */
 trait InMemoryScimTrait
 {
+    /**
+     * A write lock that is always granted.
+     */
+    private function createWriteLock(): WriteLock
+    {
+        $lockManager = $this->createStub(LockManagerInterface::class);
+        $lockManager->method('lock')->willReturn(true);
+
+        return new WriteLock($lockManager);
+    }
+
     /**
      * Build the in-memory `admin_user` store with its stateful doubles.
      */
@@ -55,6 +69,11 @@ trait InMemoryScimTrait
             $store->rows[(int)$id] = $user->getData();
 
             return $store->userResource;
+        });
+        $store->userResource->method('delete')->willReturnCallback(function (User $user) use ($store): bool {
+            unset($store->rows[(int)$user->getId()]);
+
+            return true;
         });
         $store->userResource->method('load')->willReturnCallback(
             function (User $user, $id) use ($store): UserResource {

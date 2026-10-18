@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -8,6 +9,7 @@ namespace DmLab\AdminScim\Test\Unit\Model\User;
 
 use DmLab\AdminScim\Exception\ScimException;
 use DmLab\AdminScim\Model\User\FilterParser;
+use DmLab\AdminScim\Model\User\ScimUserMapper;
 use DmLab\AdminScim\Model\User\ScimUserRepository;
 use Magento\Framework\DB\Select;
 use Magento\User\Model\ResourceModel\User as UserResource;
@@ -87,6 +89,7 @@ class ScimUserRepositoryTest extends TestCase
     {
         $user = $this->createStub(User::class);
         $user->method('getId')->willReturn(42);
+        $user->method('getData')->willReturnMap([[ScimUserMapper::MANAGED_FIELD, '1']]);
 
         $loaded = null;
         $this->userFactory->method('create')->willReturn($user);
@@ -98,6 +101,22 @@ class ScimUserRepositoryTest extends TestCase
 
         self::assertSame($user, $this->repository->getById('42'));
         self::assertSame([$user, 42], $loaded);
+    }
+
+    public function testGetByIdThrows404ForUnmanagedUser(): void
+    {
+        // A local admin exists under this id but was not created by SCIM.
+        $user = $this->createStub(User::class);
+        $user->method('getId')->willReturn(42);
+        $user->method('getData')->willReturnMap([[ScimUserMapper::MANAGED_FIELD, '0']]);
+        $this->userFactory->method('create')->willReturn($user);
+
+        try {
+            $this->repository->getById('42');
+            self::fail('Expected ScimException');
+        } catch (ScimException $e) {
+            self::assertSame(404, $e->getHttpStatus());
+        }
     }
 
     public function testGetByIdThrows404ForNonDigitId(): void
@@ -138,7 +157,7 @@ class ScimUserRepositoryTest extends TestCase
 
         $result = $this->repository->search(null, 1, 2);
 
-        self::assertSame([], $filters);
+        self::assertSame([[ScimUserMapper::MANAGED_FIELD, 1]], $filters);
         self::assertSame([2, 0], $limit);
         self::assertSame(5, $result['total']);
         self::assertSame([$userA], $result['users']);
@@ -154,7 +173,30 @@ class ScimUserRepositoryTest extends TestCase
 
         $this->repository->search('userName eq "jane"', 1, 10);
 
-        self::assertSame([['username', 'jane']], $filters);
+        self::assertSame([[ScimUserMapper::MANAGED_FIELD, 1], ['username', 'jane']], $filters);
+    }
+
+    public function testSearchTotalCountsManagedRowsOnly(): void
+    {
+        $events = [];
+        $collection = $this->createStub(Collection::class);
+        $collection->method('addFieldToFilter')->willReturnCallback(
+            function ($field, $value) use (&$events, $collection) {
+                $events[] = 'filter:' . $field;
+                return $collection;
+            }
+        );
+        $collection->method('getSize')->willReturnCallback(function () use (&$events): int {
+            $events[] = 'size';
+            return 2;
+        });
+        $this->collectionFactory->method('create')->willReturn($collection);
+
+        $result = $this->repository->search(null, 1, 0);
+
+        // The managed filter is applied before the total is taken.
+        self::assertSame(['filter:' . ScimUserMapper::MANAGED_FIELD, 'size'], $events);
+        self::assertSame(2, $result['total']);
     }
 
     public function testSearchTranslatesStartIndexToOffset(): void

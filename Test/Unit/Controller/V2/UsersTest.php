@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -10,6 +11,7 @@ use DmLab\AdminScim\Api\RequestNormalizerInterface;
 use DmLab\AdminScim\Controller\V2\Users;
 use DmLab\AdminScim\Exception\ScimException;
 use DmLab\AdminScim\Model\Auth\BearerTokenAuthenticator;
+use DmLab\AdminScim\Model\Config;
 use DmLab\AdminScim\Model\Normalization\RequestNormalizerChain;
 use DmLab\AdminScim\Model\Response\ListResponseBuilder;
 use DmLab\AdminScim\Model\Response\ScimResponse;
@@ -70,7 +72,7 @@ class UsersTest extends TestCase
             $this->mapper,
             new ListResponseBuilder(),
             new Json(),
-            new RequestNormalizerChain()
+            new RequestNormalizerChain($this->createStub(Config::class))
         );
     }
 
@@ -96,13 +98,66 @@ class UsersTest extends TestCase
     public function testUnsupportedMethodReturns501(): void
     {
         $raw = $this->createStub(Raw::class);
-        $this->request->method('getMethod')->willReturn('DELETE');
+        $this->request->method('getMethod')->willReturn('HEAD');
 
         $this->provisioner->expects(self::never())->method('create');
         $this->repository->expects(self::never())->method('getById');
         $this->response->expects(self::once())->method('error')
             ->with(self::callback(static fn (ScimException $e): bool => $e->getHttpStatus() === 501))
             ->willReturn($raw);
+        $this->logger->expects(self::never())->method('critical');
+
+        self::assertSame($raw, $this->controller->execute());
+    }
+
+    public function testDeleteRemovesUserAndReturns204(): void
+    {
+        $raw = $this->createStub(Raw::class);
+        $this->request->method('getMethod')->willReturn('DELETE');
+        $this->request->method('getPathInfo')->willReturn('/admin-scim/v2/Users/42');
+
+        $this->provisioner->expects(self::once())->method('delete')->with('42');
+        $this->response->expects(self::once())->method('noContent')->willReturn($raw);
+        $this->response->expects(self::never())->method('error');
+        $this->repository->expects(self::never())->method('getById');
+        $this->logger->expects(self::never())->method('critical');
+
+        self::assertSame($raw, $this->controller->execute());
+    }
+
+    public function testDeleteOnCollectionReturns400NoTarget(): void
+    {
+        $raw = $this->createStub(Raw::class);
+        $this->request->method('getMethod')->willReturn('DELETE');
+        $this->request->method('getPathInfo')->willReturn('/admin-scim/v2/Users');
+
+        $this->provisioner->expects(self::never())->method('delete');
+        $this->response->expects(self::never())->method('noContent');
+        $this->response->expects(self::once())->method('error')
+            ->with(self::callback(
+                static fn (ScimException $e): bool =>
+                    $e->getHttpStatus() === 400 && $e->getScimType() === 'noTarget'
+            ))
+            ->willReturn($raw);
+        $this->repository->expects(self::never())->method('getById');
+        $this->logger->expects(self::never())->method('critical');
+
+        self::assertSame($raw, $this->controller->execute());
+    }
+
+    public function testDeleteOfUnknownUserReturns404(): void
+    {
+        $raw = $this->createStub(Raw::class);
+        $this->request->method('getMethod')->willReturn('DELETE');
+        $this->request->method('getPathInfo')->willReturn('/admin-scim/v2/Users/999');
+
+        $this->provisioner->expects(self::once())->method('delete')->with('999')
+            ->willThrowException(ScimException::notFound('User "999" not found.'));
+        $this->response->expects(self::never())->method('noContent');
+        $this->response->expects(self::once())->method('error')
+            ->with(self::callback(static fn (ScimException $e): bool => $e->getHttpStatus() === 404))
+            ->willReturn($raw);
+        $this->repository->expects(self::never())->method('getById');
         $this->logger->expects(self::never())->method('critical');
 
         self::assertSame($raw, $this->controller->execute());
@@ -368,7 +423,7 @@ class UsersTest extends TestCase
             $this->mapper,
             new ListResponseBuilder(),
             new Json(),
-            new RequestNormalizerChain([$normalizer])
+            new RequestNormalizerChain($this->createStub(Config::class), ['test' => $normalizer])
         );
 
         $created = $this->createStub(User::class);

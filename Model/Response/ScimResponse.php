@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -51,6 +52,18 @@ class ScimResponse
     }
 
     /**
+     * A `204 No Content` response: empty body, no Content-Type (e.g. after DELETE).
+     */
+    public function noContent(): Raw
+    {
+        $result = $this->rawFactory->create();
+        $result->setHttpResponseCode(204);
+        $result->setContents('');
+
+        return $result;
+    }
+
+    /**
      * A SCIM error response built from a {@see ScimException}.
      *
      * @param ScimException $exception
@@ -64,6 +77,11 @@ class ScimResponse
         $body['detail'] = $exception->getMessage();
         $body['status'] = (string)$exception->getHttpStatus();
 
-        return $this->json($body, $exception->getHttpStatus());
+        $result = $this->json($body, $exception->getHttpStatus());
+        if ($exception->getRetryAfter() !== null) {
+            $result->setHeader('Retry-After', (string)$exception->getRetryAfter(), true);
+        }
+
+        return $result;
     }
 }

@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -56,6 +57,16 @@ class ScimResponseTest extends TestCase
         $this->response($raw)->json(['id' => 'abc'], 201);
     }
 
+    public function testNoContentIs204WithEmptyBodyAndNoContentType(): void
+    {
+        $raw = $this->createMock(Raw::class);
+        $raw->expects(self::once())->method('setHttpResponseCode')->with(204)->willReturnSelf();
+        $raw->expects(self::never())->method('setHeader');
+        $raw->expects(self::once())->method('setContents')->with('')->willReturnSelf();
+
+        self::assertSame($raw, $this->response($raw)->noContent());
+    }
+
     public function testErrorBuildsRfcSchemaWithoutScimType(): void
     {
         $raw = $this->createMock(Raw::class);
@@ -87,5 +98,36 @@ class ScimResponseTest extends TestCase
             'detail' => 'userName already exists.',
             'status' => '409',
         ], $this->serialized);
+    }
+
+    public function testErrorSetsRetryAfterHeaderWhenPresent(): void
+    {
+        $headers = [];
+        $raw = $this->createStub(Raw::class);
+        $raw->method('setHttpResponseCode')->willReturnSelf();
+        $raw->method('setContents')->willReturnSelf();
+        $raw->method('setHeader')->willReturnCallback(
+            function (string $name, string $value, bool $replace) use (&$headers, $raw): Raw {
+                $headers[$name] = [$value, $replace];
+                return $raw;
+            }
+        );
+
+        $this->response($raw)->error(ScimException::tooManyRequests(900));
+
+        self::assertSame(['900', true], $headers['Retry-After'] ?? null);
+        self::assertSame('429', $this->serialized['status']);
+        self::assertArrayNotHasKey('scimType', $this->serialized);
+    }
+
+    public function testErrorOmitsRetryAfterByDefault(): void
+    {
+        $raw = $this->createMock(Raw::class);
+        $raw->method('setHttpResponseCode')->willReturnSelf();
+        $raw->method('setContents')->willReturnSelf();
+        $raw->expects(self::once())->method('setHeader')
+            ->with('Content-Type', 'application/scim+json', true)->willReturnSelf();
+
+        $this->response($raw)->error(ScimException::notFound());
     }
 }

@@ -1,17 +1,23 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
 namespace DmLab\AdminScim\Test\Unit\Model\User;
 
 use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\Audit\AuditLogger;
+use DmLab\AdminScim\Model\Group\GroupRoleSynchronizer;
+use DmLab\AdminScim\Model\User\FilterParser;
 use DmLab\AdminScim\Model\User\ScimUserMapper;
 use DmLab\AdminScim\Model\User\ScimUserPatcher;
 use DmLab\AdminScim\Model\User\ScimUserRepository;
 use DmLab\AdminScim\Model\User\UserProvisioner;
+use DmLab\AdminScim\Model\WriteLock;
 use Magento\Framework\Exception\AlreadyExistsException;
+use Magento\Framework\Lock\LockManagerInterface;
 use Magento\Framework\Math\Random;
 use Magento\Framework\Phrase;
 use Magento\User\Model\ResourceModel\User as UserResource;
@@ -45,6 +51,12 @@ class UserProvisionerTest extends TestCase
     /** @var ScimUserPatcher&\PHPUnit\Framework\MockObject\Stub */
     private $patcher;
 
+    /** @var GroupRoleSynchronizer&\PHPUnit\Framework\MockObject\Stub */
+    private $synchronizer;
+
+    /** @var AuditLogger&\PHPUnit\Framework\MockObject\Stub */
+    private $auditLogger;
+
     /** @var UserProvisioner */
     private UserProvisioner $provisioner;
 
@@ -58,15 +70,33 @@ class UserProvisionerTest extends TestCase
         $this->random->method('getRandomString')->willReturn('RANDOM');
         $this->repository = $this->createStub(ScimUserRepository::class);
         $this->patcher = $this->createStub(ScimUserPatcher::class);
+        $this->synchronizer = $this->createStub(GroupRoleSynchronizer::class);
+        $this->auditLogger = $this->createStub(AuditLogger::class);
 
-        $this->provisioner = new UserProvisioner(
+        $this->provisioner = $this->provisionerWith($this->synchronizer);
+    }
+
+    /**
+     * The provisioner under test over the shared collaborators and the given synchronizer.
+     *
+     * @param GroupRoleSynchronizer $synchronizer
+     * @param AuditLogger|null $auditLogger
+     */
+    private function provisionerWith(
+        GroupRoleSynchronizer $synchronizer,
+        ?AuditLogger $auditLogger = null
+    ): UserProvisioner {
+        return new UserProvisioner(
             $this->mapper,
             $this->userFactory,
             $this->userResource,
             $this->collectionFactory,
             $this->random,
             $this->repository,
-            $this->patcher
+            $this->patcher,
+            $synchronizer,
+            $auditLogger ?? $this->auditLogger,
+            $this->writeLock()
         );
     }
 
@@ -145,6 +175,7 @@ class UserProvisionerTest extends TestCase
             'is_active' => 1,
             'interface_locale' => 'en_US',
             ScimUserMapper::EXTERNAL_ID_FIELD => 'ext-9',
+            ScimUserMapper::MANAGED_FIELD => 1,
         ], $captured);
     }
 
@@ -441,5 +472,488 @@ class UserProvisionerTest extends TestCase
             self::assertSame(409, $e->getHttpStatus());
             self::assertSame('A user with this externalId already exists.', $e->getMessage());
         }
+    }
+
+    /**
+     * A provisioner over a real repository that loads a local (non-SCIM) admin.
+     *
+     * @param ScimUserPatcher $patcher
+     */
+    private function provisionerOverUnmanagedAdmin(ScimUserPatcher $patcher): UserProvisioner
+    {
+        $local = $this->createStub(User::class);
+        $local->method('getId')->willReturn(42);
+        $local->method('getData')->willReturnMap([[ScimUserMapper::MANAGED_FIELD, '0']]);
+        $factory = $this->createStub(UserFactory::class);
+        $factory->method('create')->willReturn($local);
+        $repository = new ScimUserRepository(
+            $factory,
+            $this->createStub(UserResource::class),
+            $this->createStub(UserCollectionFactory::class),
+            new FilterParser()
+        );
+
+        return new UserProvisioner(
+            $this->mapper,
+            $this->userFactory,
+            $this->userResource,
+            $this->collectionFactory,
+            $this->random,
+            $repository,
+            $patcher,
+            $this->synchronizer,
+            $this->auditLogger,
+            $this->writeLock()
+        );
+    }
+
+    public function testReplaceOfUnmanagedAdminIs404AndSavesNothing(): void
+    {
+        $this->mapperReturns(null);
+        $provisioner = $this->provisionerOverUnmanagedAdmin($this->patcher);
+        $this->userFactory->expects(self::never())->method('create');
+        $this->collectionFactory->expects(self::never())->method('create');
+        $this->userResource->expects(self::never())->method('save');
+
+        try {
+            $provisioner->replace('42', ['userName' => 'jane.doe']);
+            self::fail('Expected ScimException');
+        } catch (ScimException $e) {
+            self::assertSame(404, $e->getHttpStatus());
+        }
+    }
+
+    public function testPatchOfUnmanagedAdminIs404AndSavesNothing(): void
+    {
+        $patcher = $this->createMock(ScimUserPatcher::class);
+        $patcher->expects(self::never())->method('apply');
+        $provisioner = $this->provisionerOverUnmanagedAdmin($patcher);
+        $this->userFactory->expects(self::never())->method('create');
+        $this->collectionFactory->expects(self::never())->method('create');
+        $this->userResource->expects(self::never())->method('save');
+
+        try {
+            $provisioner->patch('42', ['Operations' => [['op' => 'replace', 'path' => 'active', 'value' => false]]]);
+            self::fail('Expected ScimException');
+        } catch (ScimException $e) {
+            self::assertSame(404, $e->getHttpStatus());
+        }
+    }
+
+    public function testReplaceNeverClearsManagedFlag(): void
+    {
+        $this->mapperReturns(null);
+        $captured = [];
+        $user = $this->loadedUser(42, $captured);
+        $this->repository->method('getById')->willReturn($user);
+        $this->userFactory->expects(self::never())->method('create');
+        $this->collectionFactory->expects(self::exactly(2))
+            ->method('create')
+            ->willReturn($this->collectionReturning($this->emptyUser()));
+        $this->userResource->expects(self::once())->method('save');
+
+        $this->provisioner->replace('42', ['userName' => 'jane.doe']);
+
+        self::assertArrayNotHasKey(ScimUserMapper::MANAGED_FIELD, $captured);
+    }
+
+    public function testCreateSyncsRoleOfNewUser(): void
+    {
+        $this->mapperReturns(null);
+        $this->collectionFactory->expects(self::exactly(2))
+            ->method('create')
+            ->willReturn($this->collectionReturning($this->emptyUser()));
+        $newUser = $this->createStub(User::class);
+        $newUser->method('setData')->willReturnSelf();
+        $newUser->method('getId')->willReturn(42);
+        $this->userFactory->expects(self::once())->method('create')->willReturn($newUser);
+        $this->userResource->expects(self::once())->method('save')->with($newUser);
+
+        $synchronizer = $this->createMock(GroupRoleSynchronizer::class);
+        $synchronizer->expects(self::once())->method('syncUsers')->with([42]);
+
+        $this->provisionerWith($synchronizer)->create(['userName' => 'jane.doe']);
+    }
+
+    public function testReplaceSyncsRoleOfUser(): void
+    {
+        $this->mapperReturns(null);
+        $captured = [];
+        $user = $this->loadedUser(42, $captured);
+        $this->repository->method('getById')->willReturn($user);
+        $this->userFactory->expects(self::never())->method('create');
+        $this->collectionFactory->expects(self::exactly(2))
+            ->method('create')
+            ->willReturn($this->collectionReturning($this->emptyUser()));
+        $this->userResource->expects(self::once())->method('save')->with($user);
+
+        $synchronizer = $this->createMock(GroupRoleSynchronizer::class);
+        $synchronizer->expects(self::once())->method('syncUsers')->with([42]);
+
+        $this->provisionerWith($synchronizer)->replace('42', ['userName' => 'jane.doe']);
+    }
+
+    public function testPatchSyncsRoleOfUser(): void
+    {
+        $user = $this->createStub(User::class);
+        $user->method('getId')->willReturn(42);
+        $user->method('getData')->willReturnMap([
+            ['username', 'jane.doe'],
+            ['email', 'jane@example.com'],
+            [ScimUserMapper::EXTERNAL_ID_FIELD, null],
+        ]);
+        $this->repository->method('getById')->willReturn($user);
+        $this->userFactory->expects(self::never())->method('create');
+        $this->collectionFactory->expects(self::exactly(2))
+            ->method('create')
+            ->willReturn($this->collectionReturning($this->emptyUser()));
+        $this->userResource->expects(self::once())->method('save')->with($user);
+
+        $synchronizer = $this->createMock(GroupRoleSynchronizer::class);
+        $synchronizer->expects(self::once())->method('syncUsers')->with([42]);
+
+        $this->provisionerWith($synchronizer)->patch(
+            '42',
+            ['Operations' => [['op' => 'replace', 'path' => 'active', 'value' => false]]]
+        );
+    }
+
+    public function testNoRoleSyncWhenCreateConflicts(): void
+    {
+        $this->mapperReturns(null);
+        $this->collectionFactory->expects(self::once())
+            ->method('create')
+            ->willReturn($this->collectionReturning($this->existingUser(5)));
+        $this->userFactory->expects(self::never())->method('create');
+        $this->userResource->expects(self::never())->method('save');
+
+        $synchronizer = $this->createMock(GroupRoleSynchronizer::class);
+        $synchronizer->expects(self::never())->method('syncUsers');
+
+        $this->expectException(ScimException::class);
+
+        $this->provisionerWith($synchronizer)->create(['userName' => 'jane.doe']);
+    }
+
+    public function testDeleteRemovesLoadedUser(): void
+    {
+        $this->userFactory->expects(self::never())->method('create');
+        $this->collectionFactory->expects(self::never())->method('create');
+        $user = $this->existingUser(42);
+        $this->repository->method('getById')->willReturn($user);
+        $this->userResource->expects(self::once())->method('delete')->with($user)->willReturn(true);
+        $this->userResource->expects(self::never())->method('save');
+
+        $this->provisioner->delete('42');
+    }
+
+    public function testDeletePropagatesNotFound(): void
+    {
+        $this->userFactory->expects(self::never())->method('create');
+        $this->collectionFactory->expects(self::never())->method('create');
+        $this->repository->method('getById')
+            ->willThrowException(ScimException::notFound('User "999" not found.'));
+        $this->userResource->expects(self::never())->method('delete');
+
+        try {
+            $this->provisioner->delete('999');
+            self::fail('Expected ScimException');
+        } catch (ScimException $e) {
+            self::assertSame(404, $e->getHttpStatus());
+        }
+    }
+
+    public function testDeleteOfUnmanagedAdminIs404AndDeletesNothing(): void
+    {
+        $this->userFactory->expects(self::never())->method('create');
+        $this->collectionFactory->expects(self::never())->method('create');
+        $provisioner = $this->provisionerOverUnmanagedAdmin($this->patcher);
+        $this->userResource->expects(self::never())->method('delete');
+
+        try {
+            $provisioner->delete('42');
+            self::fail('Expected ScimException');
+        } catch (ScimException $e) {
+            self::assertSame(404, $e->getHttpStatus());
+        }
+    }
+
+    public function testDeleteFailureReportedByResourceIs500(): void
+    {
+        $this->userFactory->expects(self::never())->method('create');
+        $this->collectionFactory->expects(self::never())->method('create');
+        $this->repository->method('getById')->willReturn($this->existingUser(42));
+        $this->userResource->expects(self::once())->method('delete')->willReturn(false);
+
+        try {
+            $this->provisioner->delete('42');
+            self::fail('Expected ScimException');
+        } catch (ScimException $e) {
+            self::assertSame(500, $e->getHttpStatus());
+        }
+    }
+
+    /** An audit logger expecting exactly one event with the given context. */
+    private function expectAudit(string $event, array $context): AuditLogger
+    {
+        $auditLogger = $this->createMock(AuditLogger::class);
+        $auditLogger->expects(self::once())->method('log')->with($event, $context);
+
+        return $auditLogger;
+    }
+
+    /** A loaded admin user whose getData reads from a mutable array. */
+    private function userWithData(int $id, array &$data): User
+    {
+        $user = $this->createStub(User::class);
+        $user->method('getId')->willReturn($id);
+        $user->method('getData')->willReturnCallback(
+            static function ($key = '') use (&$data) {
+                return $data[$key] ?? null;
+            }
+        );
+        $user->method('addData')->willReturnCallback(
+            static function (array $more) use (&$data, $user) {
+                $data = $more + $data;
+                return $user;
+            }
+        );
+
+        return $user;
+    }
+
+    public function testCreateLogsUserCreate(): void
+    {
+        $this->mapperReturns(null);
+        $this->collectionFactory->expects(self::exactly(2))->method('create')
+            ->willReturn($this->collectionReturning($this->emptyUser()));
+        $data = [];
+        $newUser = $this->userWithData(42, $data);
+        $newUser->method('setData')->willReturnCallback(
+            static function (array $values) use (&$data, $newUser) {
+                $data = $values;
+                return $newUser;
+            }
+        );
+        $this->userFactory->expects(self::once())->method('create')->willReturn($newUser);
+        $this->userResource->expects(self::once())->method('save')->with($newUser);
+
+        $this->provisionerWith(
+            $this->synchronizer,
+            $this->expectAudit('user.create', ['user_id' => 42, 'userName' => 'jane.doe'])
+        )->create(['userName' => 'jane.doe']);
+    }
+
+    public function testReplaceLogsUserReplace(): void
+    {
+        $this->mapperReturns(null);
+        $data = ['username' => 'old.name'];
+        $this->repository->method('getById')->willReturn($this->userWithData(42, $data));
+        $this->collectionFactory->expects(self::exactly(2))->method('create')
+            ->willReturn($this->collectionReturning($this->emptyUser()));
+        $this->userFactory->expects(self::never())->method('create');
+        $this->userResource->expects(self::once())->method('save');
+
+        $this->provisionerWith(
+            $this->synchronizer,
+            $this->expectAudit('user.replace', ['user_id' => 42, 'userName' => 'jane.doe'])
+        )->replace('42', ['userName' => 'jane.doe']);
+    }
+
+    public function testPatchLogsActiveBeforeAndAfter(): void
+    {
+        $data = ['username' => 'jane.doe', 'email' => 'jane@example.com', 'is_active' => '1'];
+        $this->repository->method('getById')->willReturn($this->userWithData(42, $data));
+        $this->patcher->method('apply')->willReturnCallback(
+            static function () use (&$data): void {
+                $data['is_active'] = 0;
+            }
+        );
+        $this->collectionFactory->expects(self::exactly(2))->method('create')
+            ->willReturn($this->collectionReturning($this->emptyUser()));
+        $this->userFactory->expects(self::never())->method('create');
+        $this->userResource->expects(self::once())->method('save');
+
+        $this->provisionerWith(
+            $this->synchronizer,
+            $this->expectAudit('user.patch', [
+                'user_id' => 42,
+                'userName' => 'jane.doe',
+                'active_before' => true,
+                'active_after' => false,
+            ])
+        )->patch('42', ['Operations' => [['op' => 'replace', 'path' => 'active', 'value' => false]]]);
+    }
+
+    public function testDeleteLogsUserDelete(): void
+    {
+        $data = ['username' => 'jane.doe'];
+        $this->repository->method('getById')->willReturn($this->userWithData(42, $data));
+        $this->collectionFactory->expects(self::never())->method('create');
+        $this->userFactory->expects(self::never())->method('create');
+        $this->userResource->expects(self::once())->method('delete')->willReturn(true);
+
+        $this->provisionerWith(
+            $this->synchronizer,
+            $this->expectAudit('user.delete', ['user_id' => 42, 'userName' => 'jane.doe'])
+        )->delete('42');
+    }
+
+    public function testConflictingCreateLogsNothing(): void
+    {
+        $this->mapperReturns(null);
+        $this->collectionFactory->expects(self::once())->method('create')
+            ->willReturn($this->collectionReturning($this->existingUser(5)));
+        $this->userFactory->expects(self::never())->method('create');
+        $this->userResource->expects(self::never())->method('save');
+
+        try {
+            $this->provisionerWith($this->synchronizer, $this->expectNoAudit())->create(['userName' => 'jane.doe']);
+            self::fail('Expected ScimException');
+        } catch (ScimException $e) {
+            self::assertSame(409, $e->getHttpStatus());
+        }
+    }
+
+    public function testFailedDeleteLogsNothing(): void
+    {
+        $this->repository->method('getById')->willReturn($this->existingUser(42));
+        $this->userFactory->expects(self::never())->method('create');
+        $this->collectionFactory->expects(self::never())->method('create');
+        $this->userResource->expects(self::once())->method('delete')->willReturn(false);
+
+        try {
+            $this->provisionerWith($this->synchronizer, $this->expectNoAudit())->delete('42');
+            self::fail('Expected ScimException');
+        } catch (ScimException $e) {
+            self::assertSame(500, $e->getHttpStatus());
+        }
+    }
+
+    public function testCreateRollsBackWhenRoleSyncFails(): void
+    {
+        $this->mapperReturns(null);
+        $this->collectionFactory->expects(self::exactly(2))->method('create')
+            ->willReturn($this->collectionReturning($this->emptyUser()));
+        $newUser = $this->createStub(User::class);
+        $newUser->method('getId')->willReturn(42);
+        $this->userFactory->expects(self::once())->method('create')->willReturn($newUser);
+        $this->userResource->expects(self::once())->method('beginTransaction');
+        $this->userResource->expects(self::once())->method('save');
+        $this->userResource->expects(self::once())->method('rollBack');
+        $this->userResource->expects(self::never())->method('commit');
+
+        $synchronizer = $this->createStub(GroupRoleSynchronizer::class);
+        $synchronizer->method('syncUsers')->willThrowException(new \RuntimeException('role save failed'));
+
+        $this->expectException(\RuntimeException::class);
+        $this->provisionerWith($synchronizer, $this->expectNoAudit())->create(['userName' => 'jane.doe']);
+    }
+
+    public function testDuplicateOnSaveRollsBackWithoutRoleSync(): void
+    {
+        $this->mapperReturns(null);
+        $this->collectionFactory->expects(self::exactly(2))->method('create')
+            ->willReturn($this->collectionReturning($this->emptyUser()));
+        $this->userFactory->expects(self::once())->method('create')->willReturn($this->createStub(User::class));
+        $this->userResource->method('save')
+            ->willThrowException(new AlreadyExistsException(new Phrase('Unique constraint violation found')));
+        $this->userResource->expects(self::once())->method('rollBack');
+        $this->userResource->expects(self::never())->method('commit');
+
+        $synchronizer = $this->createMock(GroupRoleSynchronizer::class);
+        $synchronizer->expects(self::never())->method('syncUsers');
+
+        $this->expectException(ScimException::class);
+        $this->provisionerWith($synchronizer)->create(['userName' => 'jane.doe']);
+    }
+
+    public function testSuccessfulWriteCommits(): void
+    {
+        $this->mapperReturns(null);
+        $this->collectionFactory->expects(self::exactly(2))->method('create')
+            ->willReturn($this->collectionReturning($this->emptyUser()));
+        $newUser = $this->createStub(User::class);
+        $newUser->method('getId')->willReturn(42);
+        $this->userFactory->expects(self::once())->method('create')->willReturn($newUser);
+        $this->userResource->expects(self::once())->method('beginTransaction');
+        $this->userResource->expects(self::once())->method('commit');
+        $this->userResource->expects(self::never())->method('rollBack');
+
+        $this->provisioner->create(['userName' => 'jane.doe']);
+    }
+
+    /** An audit logger that must never be written to. */
+    private function expectNoAudit(): AuditLogger
+    {
+        $auditLogger = $this->createMock(AuditLogger::class);
+        $auditLogger->expects(self::never())->method('log');
+
+        return $auditLogger;
+    }
+
+    /** A write lock that is always granted. */
+    private function writeLock(): WriteLock
+    {
+        $lockManager = $this->createStub(LockManagerInterface::class);
+        $lockManager->method('lock')->willReturn(true);
+
+        return new WriteLock($lockManager);
+    }
+
+    public function testRoleChangeIsLoggedAfterCommit(): void
+    {
+        $this->mapperReturns(null);
+        $this->collectionFactory->expects(self::exactly(2))->method('create')
+            ->willReturn($this->collectionReturning($this->emptyUser()));
+        $newUser = $this->createStub(User::class);
+        $newUser->method('getId')->willReturn(42);
+        $this->userFactory->expects(self::once())->method('create')->willReturn($newUser);
+
+        $calls = [];
+        $change = ['user_id' => 42, 'userName' => 'jane.doe', 'from' => null, 'to' => 1];
+        $synchronizer = $this->createStub(GroupRoleSynchronizer::class);
+        $synchronizer->method('syncUsers')->willReturn([$change]);
+        $this->userResource->expects(self::once())->method('save');
+        $this->userResource->method('commit')->willReturnCallback(function () use (&$calls): UserResource {
+            $calls[] = 'commit';
+            return $this->userResource;
+        });
+        $auditLogger = $this->createMock(AuditLogger::class);
+        $auditLogger->expects(self::exactly(2))->method('log')->willReturnCallback(
+            static function (string $event, array $context) use (&$calls): void {
+                $calls[] = $event;
+            }
+        );
+
+        $this->provisionerWith($synchronizer, $auditLogger)->create(['userName' => 'jane.doe']);
+
+        self::assertSame(['commit', 'user.create', 'role.change'], $calls);
+    }
+
+    public function testWritesRunUnderTheWriteLock(): void
+    {
+        $lockManager = $this->createMock(LockManagerInterface::class);
+        $lockManager->expects(self::once())->method('lock')->willReturn(false);
+        $this->repository->method('getById')->willReturn($this->existingUser(42));
+        $this->userResource->expects(self::never())->method('delete');
+        $this->userFactory->expects(self::never())->method('create');
+        $this->collectionFactory->expects(self::never())->method('create');
+
+        $provisioner = new UserProvisioner(
+            $this->mapper,
+            $this->userFactory,
+            $this->userResource,
+            $this->collectionFactory,
+            $this->random,
+            $this->repository,
+            $this->patcher,
+            $this->synchronizer,
+            $this->auditLogger,
+            new WriteLock($lockManager)
+        );
+
+        $this->expectException(ScimException::class);
+        $provisioner->delete('42');
     }
 }

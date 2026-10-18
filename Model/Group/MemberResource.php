@@ -1,11 +1,13 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
 namespace DmLab\AdminScim\Model\Group;
 
+use DmLab\AdminScim\Model\User\ScimUserMapper;
 use Magento\Framework\App\ResourceConnection;
 
 /**
@@ -31,7 +33,7 @@ class MemberResource
     }
 
     /**
-     * Members of a group as SCIM member records, ordered by user id.
+     * SCIM-managed members of a group as SCIM member records, ordered by user id.
      *
      * @param int $groupId
      * @return array<int,array{value:string,display:string}>
@@ -41,12 +43,13 @@ class MemberResource
         $connection = $this->resource->getConnection();
         $select = $connection->select()
             ->from(['m' => $this->resource->getTableName(self::MEMBER_TABLE)], ['user_id'])
-            ->joinLeft(
+            ->join(
                 ['u' => $this->resource->getTableName(self::USER_TABLE)],
                 'u.user_id = m.user_id',
                 ['username']
             )
             ->where('m.group_id = ?', $groupId)
+            ->where('u.' . ScimUserMapper::MANAGED_FIELD . ' = ?', 1)
             ->order('m.user_id ASC');
 
         $members = [];
@@ -149,14 +152,14 @@ class MemberResource
     }
 
     /**
-     * Of the given ids, those with no matching `admin_user` row.
+     * Of the given ids, those with no matching SCIM-managed `admin_user` row.
      *
-     * The member join table has an FK to `admin_user`; callers validate against
-     * this before writing so an unknown-but-well-formed id fails as a SCIM 400
-     * rather than an opaque FK-violation 500.
+     * Callers validate against this before writing, so an unknown id fails as a
+     * SCIM 400 rather than an FK-violation 500, and a local admin can never be
+     * made a member.
      *
      * @param int[] $userIds
-     * @return int[] the ids that do not exist, de-duplicated
+     * @return int[] the ids that do not exist or are not SCIM-managed, de-duplicated
      */
     public function findMissingUserIds(array $userIds): array
     {
@@ -168,7 +171,8 @@ class MemberResource
         $connection = $this->resource->getConnection();
         $select = $connection->select()
             ->from($this->resource->getTableName(self::USER_TABLE), ['user_id'])
-            ->where('user_id IN (?)', $userIds);
+            ->where('user_id IN (?)', $userIds)
+            ->where(ScimUserMapper::MANAGED_FIELD . ' = ?', 1);
         $existing = array_map('intval', $connection->fetchCol($select));
 
         return array_values(array_diff($userIds, $existing));

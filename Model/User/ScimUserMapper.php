@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -25,6 +26,9 @@ class ScimUserMapper
 
     /** admin_user column linking the account to its SCIM resource (see etc/db_schema.xml). */
     public const EXTERNAL_ID_FIELD = 'dmlab_scim_external_id';
+
+    /** admin_user flag: 1 = created by SCIM. SCIM sees and touches only these rows. */
+    public const MANAGED_FIELD = 'dmlab_scim_managed';
 
     /** Lastname used when the payload carries no usable family name. */
     private const DEFAULT_LAST_NAME = 'SCIM';

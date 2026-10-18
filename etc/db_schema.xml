@@ -2,6 +2,7 @@
 <!--
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 -->
 <schema xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -14,9 +15,16 @@
              many NULLs). -->
         <column xsi:type="varchar" name="dmlab_scim_external_id" nullable="true" length="255"
                 comment="DmLab SCIM external identifier"/>
+        <!-- 1 = created by SCIM; SCIM reads and writes only these rows, local admins
+             stay invisible to it. Set at create, never cleared by SCIM. -->
+        <column xsi:type="smallint" name="dmlab_scim_managed" unsigned="true" nullable="false" default="0"
+                comment="DmLab SCIM managed flag"/>
         <constraint xsi:type="unique" referenceId="DMLAB_ADMIN_SCIM_EXTERNAL_ID">
             <column name="dmlab_scim_external_id"/>
         </constraint>
+        <index referenceId="DMLAB_ADMIN_SCIM_MANAGED" indexType="btree">
+            <column name="dmlab_scim_managed"/>
+        </index>
     </table>
 
     <!-- A provisioned SCIM Group. Its `group_id` is the SCIM resource id; the

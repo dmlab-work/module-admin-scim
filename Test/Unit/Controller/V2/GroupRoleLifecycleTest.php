@@ -1,12 +1,14 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
 namespace DmLab\AdminScim\Test\Unit\Controller\V2;
 
 use DmLab\AdminScim\Controller\V2\Groups;
+use DmLab\AdminScim\Model\Audit\AuditLogger;
 use DmLab\AdminScim\Model\Auth\BearerTokenAuthenticator;
 use DmLab\AdminScim\Model\Config;
 use DmLab\AdminScim\Model\Group\GroupFilterParser;
@@ -20,6 +22,7 @@ use DmLab\AdminScim\Model\Group\ScimGroupPatcher;
 use DmLab\AdminScim\Model\Group\ScimGroupRepository;
 use DmLab\AdminScim\Model\Normalization\RequestNormalizerChain;
 use DmLab\AdminScim\Model\Response\ListResponseBuilder;
+use DmLab\AdminScim\Model\User\ScimUserMapper;
 use DmLab\AdminScim\Test\Unit\Doubles\AdminUserStore;
 use DmLab\AdminScim\Test\Unit\Doubles\InMemoryScimTrait;
 use DmLab\AdminScim\Test\Unit\Doubles\ScimResponseCapture;
@@ -33,7 +36,7 @@ use Psr\Log\LoggerInterface;
 /**
  * Acceptance test: SCIM Group provisioning drives an admin's ACL role — create a
  * group with a mapped displayName grants the role to its members; removing a
- * member revokes it. Exercised end-to-end through the real {@see Groups}
+ * member, replacing the members or deleting the group revokes it. Exercised end-to-end through the real {@see Groups}
  * controller, {@see GroupProvisioner} and {@see GroupRoleSynchronizer} (real
  * the {@see MappingEngine}) against in-memory group/member/admin_user stores
  * (Task 9 acceptance criteria — the group→role step).
@@ -80,6 +83,7 @@ class GroupRoleLifecycleTest extends TestCase
             'firstname' => 'Jane',
             'lastname' => 'Doe',
             'is_active' => 1,
+            ScimUserMapper::MANAGED_FIELD => 1,
         ];
 
         $urls = $this->createUrlBuilder();
@@ -108,7 +112,9 @@ class GroupRoleLifecycleTest extends TestCase
             new ScimGroupPatcher($this->mapper),
             $this->memberResource,
             $synchronizer,
-            $this->createResourceConnection()
+            $this->createResourceConnection(),
+            $this->createStub(AuditLogger::class),
+            $this->createWriteLock()
         );
     }
 
@@ -145,6 +151,55 @@ class GroupRoleLifecycleTest extends TestCase
         self::assertArrayHasKey(1, $this->store->rows);
     }
 
+    public function testDeletingMappedGroupStripsMemberRole(): void
+    {
+        [$status, $created] = $this->dispatch('POST', self::BASE, json_encode([
+            'schemas' => [ScimGroupMapper::SCHEMA_GROUP],
+            'displayName' => 'Admins',
+            'members' => [['value' => '1']],
+        ]));
+        self::assertSame(201, $status);
+        self::assertSame(5, (int)$this->store->rows[1]['role_id']);
+
+        [$status, $body] = $this->dispatch('DELETE', self::BASE . '/' . $created['id']);
+        self::assertSame(204, $status);
+        self::assertSame([], $body);
+        self::assertSame([], $this->groups);
+        // The former member's only mapped group is gone → role stripped, account kept.
+        self::assertSame(0, (int)$this->store->rows[1]['role_id']);
+        self::assertArrayHasKey(1, $this->store->rows);
+
+        [$status] = $this->dispatch('GET', self::BASE . '/' . $created['id']);
+        self::assertSame(404, $status);
+    }
+
+    public function testPutReplacingMembersMovesRole(): void
+    {
+        $this->store->rows[2] = [
+            'user_id' => 2,
+            'username' => 'john',
+            'email' => 'john@example.com',
+            'is_active' => 1,
+            ScimUserMapper::MANAGED_FIELD => 1,
+        ];
+        [, $created] = $this->dispatch('POST', self::BASE, json_encode([
+            'schemas' => [ScimGroupMapper::SCHEMA_GROUP],
+            'displayName' => 'Admins',
+            'members' => [['value' => '1']],
+        ]));
+
+        [$status, $replaced] = $this->dispatch('PUT', self::BASE . '/' . $created['id'], json_encode([
+            'schemas' => [ScimGroupMapper::SCHEMA_GROUP],
+            'displayName' => 'Admins',
+            'members' => [['value' => '2']],
+        ]));
+
+        self::assertSame(200, $status);
+        self::assertSame('2', $replaced['members'][0]['value']);
+        self::assertSame(0, (int)$this->store->rows[1]['role_id']);
+        self::assertSame(5, (int)$this->store->rows[2]['role_id']);
+    }
+
     public function testCreateWithUnknownMemberReturns400AndLeavesNoGroup(): void
     {
         [$status, $error] = $this->dispatch('POST', self::BASE, json_encode([
@@ -157,6 +212,84 @@ class GroupRoleLifecycleTest extends TestCase
         self::assertSame('invalidValue', $error['scimType']);
         // No orphaned group row was persisted, so the displayName stays free for a retry.
         self::assertSame([], $this->groups);
+    }
+
+    public function testLocalAdminCannotBeMadeMember(): void
+    {
+        $this->store->rows[2] = [
+            'user_id' => 2,
+            'username' => 'local.admin',
+            'email' => 'local@example.com',
+            'is_active' => 1,
+            'role_id' => 1,
+        ];
+
+        [$status, $error] = $this->dispatch('POST', self::BASE, json_encode([
+            'schemas' => [ScimGroupMapper::SCHEMA_GROUP],
+            'displayName' => 'Admins',
+            'members' => [['value' => '2']],
+        ]));
+
+        self::assertSame(400, $status);
+        self::assertSame('invalidValue', $error['scimType']);
+        self::assertSame([], $this->groups);
+        self::assertSame(1, $this->store->rows[2]['role_id']);
+    }
+
+    public function testLocalAdminCannotBeAddedByPatch(): void
+    {
+        $this->store->rows[2] = [
+            'user_id' => 2,
+            'username' => 'local.admin',
+            'email' => 'local@example.com',
+            'is_active' => 1,
+            'role_id' => 1,
+        ];
+        [, $created] = $this->dispatch('POST', self::BASE, json_encode([
+            'schemas' => [ScimGroupMapper::SCHEMA_GROUP],
+            'displayName' => 'Admins',
+            'members' => [['value' => '1']],
+        ]));
+
+        [$status, $error] = $this->dispatch('PATCH', self::BASE . '/' . $created['id'], json_encode([
+            'schemas' => ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
+            'Operations' => [['op' => 'add', 'path' => 'members', 'value' => [['value' => '2']]]],
+        ]));
+
+        self::assertSame(400, $status);
+        self::assertSame('invalidValue', $error['scimType']);
+        self::assertSame([1], $this->members[(int)$created['id']]);
+        self::assertSame(1, $this->store->rows[2]['role_id']);
+    }
+
+    public function testStaleUnmanagedMemberIsHiddenAndDoesNotBlockPatch(): void
+    {
+        // A pre-0.2.0 membership row naming a local admin.
+        $this->store->rows[2] = [
+            'user_id' => 2,
+            'username' => 'local.admin',
+            'email' => 'local@example.com',
+            'is_active' => 1,
+            'role_id' => 1,
+        ];
+        $this->groups[1] = new ScimGroup(1, 'Admins');
+        $this->groupAutoId = 1;
+        $this->members[1] = [2];
+
+        [$status, $read] = $this->dispatch('GET', self::BASE . '/1');
+        self::assertSame(200, $status);
+        self::assertSame([], $read['members']);
+
+        [$status, $patched] = $this->dispatch('PATCH', self::BASE . '/1', json_encode([
+            'schemas' => ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
+            'Operations' => [['op' => 'add', 'path' => 'members', 'value' => [['value' => '1']]]],
+        ]));
+
+        self::assertSame(200, $status);
+        self::assertSame('1', $patched['members'][0]['value']);
+        self::assertCount(1, $patched['members']);
+        self::assertSame(5, (int)$this->store->rows[1]['role_id']);
+        self::assertSame(1, $this->store->rows[2]['role_id']);
     }
 
     /**
@@ -190,6 +323,9 @@ class GroupRoleLifecycleTest extends TestCase
                 $group->externalId
             );
         });
+        $resource->method('delete')->willReturnCallback(function (int $groupId): void {
+            unset($this->groups[$groupId]);
+        });
         $resource->method('getById')->willReturnCallback(function (int $groupId): ?ScimGroup {
             if (!isset($this->groups[$groupId])) {
                 return null;
@@ -211,19 +347,27 @@ class GroupRoleLifecycleTest extends TestCase
         $resource->method('setMembers')->willReturnCallback(function (int $groupId, array $userIds): void {
             $this->members[$groupId] = array_values(array_unique(array_map('intval', $userIds)));
         });
+        $resource->method('removeAllForGroup')->willReturnCallback(function (int $groupId): void {
+            unset($this->members[$groupId]);
+        });
         $resource->method('getUserIds')->willReturnCallback(
             fn (int $groupId): array => $this->members[$groupId] ?? []
         );
         $resource->method('getMembers')->willReturnCallback(function (int $groupId): array {
-            return array_map(fn (int $userId): array => [
+            $managed = array_filter(
+                $this->members[$groupId] ?? [],
+                fn (int $userId): bool => (int)($this->store->rows[$userId][ScimUserMapper::MANAGED_FIELD] ?? 0) === 1
+            );
+
+            return array_values(array_map(fn (int $userId): array => [
                 'value' => (string)$userId,
-                'display' => (string)($this->store->rows[$userId]['username'] ?? ''),
-            ], $this->members[$groupId] ?? []);
+                'display' => (string)$this->store->rows[$userId]['username'],
+            ], $managed));
         });
         $resource->method('findMissingUserIds')->willReturnCallback(
             fn (array $userIds): array => array_values(array_filter(
                 array_map('intval', $userIds),
-                fn (int $userId): bool => !isset($this->store->rows[$userId])
+                fn (int $userId): bool => (int)($this->store->rows[$userId][ScimUserMapper::MANAGED_FIELD] ?? 0) !== 1
             ))
         );
         $resource->method('getGroupDisplayNamesForUser')->willReturnCallback(function (int $userId): array {
@@ -290,7 +434,7 @@ class GroupRoleLifecycleTest extends TestCase
             $this->memberResource,
             new ListResponseBuilder(),
             new Json(),
-            new RequestNormalizerChain()
+            new RequestNormalizerChain($this->createStub(Config::class))
         );
         $controller->execute();
 

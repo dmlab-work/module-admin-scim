@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -30,6 +31,9 @@ class Config
 
     /** ACL role id assigned when a member's groups match no mapping rule. */
     public const XML_PATH_DEFAULT_ROLE = 'dmlab_admin_scim/general/default_role';
+
+    /** Provider code whose request normalizer runs; empty = auto. */
+    public const XML_PATH_PROVIDER = 'dmlab_admin_scim/general/provider';
 
     /**
      * @param ScopeConfigInterface $scopeConfig
@@ -107,6 +111,17 @@ class Config
     public function getDefaultRoleId(): ?string
     {
         $value = $this->scopeConfig->getValue(self::XML_PATH_DEFAULT_ROLE);
+        $value = is_string($value) ? trim($value) : '';
+
+        return $value === '' ? null : $value;
+    }
+
+    /**
+     * Configured provider code (a normalizer di item key), or null when unset.
+     */
+    public function getProvider(): ?string
+    {
+        $value = $this->scopeConfig->getValue(self::XML_PATH_PROVIDER);
         $value = is_string($value) ? trim($value) : '';
 
         return $value === '' ? null : $value;

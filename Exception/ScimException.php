@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -19,12 +20,14 @@ class ScimException extends \RuntimeException
      * @param string $detail Human-readable error detail.
      * @param string|null $scimType RFC 7644 detail error keyword (e.g. `invalidValue`, `uniqueness`).
      * @param \Throwable|null $previous
+     * @param int|null $retryAfter Seconds for the `Retry-After` header, or null for none.
      */
     public function __construct(
         private readonly int $httpStatus,
         string $detail,
         private readonly ?string $scimType = null,
-        ?\Throwable $previous = null
+        ?\Throwable $previous = null,
+        private readonly ?int $retryAfter = null
     ) {
         parent::__construct($detail, 0, $previous);
     }
@@ -43,6 +46,14 @@ class ScimException extends \RuntimeException
     public function getScimType(): ?string
     {
         return $this->scimType;
+    }
+
+    /**
+     * Seconds the client should wait before retrying, or null when not applicable.
+     */
+    public function getRetryAfter(): ?int
+    {
+        return $this->retryAfter;
     }
 
     // Named constructors keep call sites readable; static is intentional (these
@@ -89,6 +100,17 @@ class ScimException extends \RuntimeException
     public static function conflict(string $detail, ?string $scimType = 'uniqueness'): self
     {
         return new self(409, $detail, $scimType);
+    }
+
+    /**
+     * 429 Too Many Requests — the client is temporarily blocked.
+     *
+     * @param int $retryAfter Seconds until the client may retry.
+     * @param string $detail
+     */
+    public static function tooManyRequests(int $retryAfter, string $detail = 'Too many requests.'): self
+    {
+        return new self(429, $detail, null, null, $retryAfter);
     }
 
     /**

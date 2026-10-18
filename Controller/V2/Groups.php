@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -28,10 +29,9 @@ use Psr\Log\LoggerInterface;
  * `/admin-scim/v2/Groups` — the SCIM Group collection endpoint.
  *
  * Serves POST (create), GET (read one by `id`, or list with the supported filter
- * subset + pagination) and PATCH (add/replace/remove of attributes and members).
- * A member change re-derives the affected admins' ACL role (see
- * {@see GroupProvisioner}). PUT/DELETE answer `501 Not Implemented`; IdPs manage
- * group membership via PATCH.
+ * subset + pagination), PUT (full replace), PATCH (add/replace/remove of attributes
+ * and members) and DELETE (204). A member change re-derives the affected admins'
+ * ACL role (see {@see GroupProvisioner}). Unsupported verbs answer `501 Not Implemented`.
  */
 class Groups extends AbstractScim
 {
@@ -75,7 +75,9 @@ class Groups extends AbstractScim
         return match (strtoupper($this->request->getMethod())) {
             'POST' => $this->create(),
             'GET' => $this->read(),
+            'PUT' => $this->replace(),
             'PATCH' => $this->patch(),
+            'DELETE' => $this->delete(),
             default => throw ScimException::notImplemented(),
         };
     }
@@ -88,6 +90,26 @@ class Groups extends AbstractScim
         $group = $this->provisioner->create($this->parseBody());
 
         return $this->response->json($this->resource($group), 201);
+    }
+
+    /**
+     * `PUT /Groups/{id}` replaces the whole resource, returning the updated one.
+     */
+    private function replace(): ResultInterface
+    {
+        $group = $this->provisioner->replace($this->requireResourceId(), $this->parseBody());
+
+        return $this->response->json($this->resource($group));
+    }
+
+    /**
+     * `DELETE /Groups/{id}` deletes the group, answering `204 No Content`.
+     */
+    private function delete(): ResultInterface
+    {
+        $this->provisioner->delete($this->requireResourceId());
+
+        return $this->response->noContent();
     }
 
     /**
@@ -168,7 +190,7 @@ class Groups extends AbstractScim
     }
 
     /**
-     * The `{id}` path segment, required for single-resource verbs (PATCH).
+     * The `{id}` path segment, required for single-resource verbs (PUT/PATCH/DELETE).
      *
      * @throws ScimException 400 `noTarget` when the request targets the collection
      */

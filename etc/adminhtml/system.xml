@@ -2,6 +2,7 @@
 <!--
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 -->
 <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -24,13 +25,20 @@
                     <label>Enable Admin SCIM</label>
                     <source_model>Magento\Config\Model\Config\Source\Yesno</source_model>
                 </field>
+                <field id="provider" translate="label comment" type="select" sortOrder="15"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Provider</label>
+                    <source_model>DmLab\AdminScim\Model\Config\Source\Provider</source_model>
+                    <comment><![CDATA[IdP whose request quirks are normalized. Under "None", a single installed provider plugin still applies; with several installed, none runs until one is picked.]]></comment>
+                    <depends>
+                        <field id="enabled">1</field>
+                    </depends>
+                </field>
                 <field id="bearer_token" translate="label comment" type="obscure" sortOrder="20"
                        showInDefault="1" showInWebsite="0" showInStore="0">
                     <label>Bearer Token</label>
                     <backend_model>Magento\Config\Model\Config\Backend\Encrypted</backend_model>
-                    <comment><![CDATA[The provisioning credential the IdP presents as
-                        <code>Authorization: Bearer &lt;token&gt;</code>. Stored encrypted.
-                        Treat as a full admin-provisioning secret — use a long random value and rotate it.]]></comment>
+                    <comment><![CDATA[The provisioning credential the IdP presents as <code>Authorization: Bearer &lt;token&gt;</code>. Stored encrypted. Treat as a full admin-provisioning secret — use a long random value and rotate it.]]></comment>
                     <depends>
                         <field id="enabled">1</field>
                     </depends>
@@ -38,10 +46,7 @@
                 <field id="group_role_map" translate="label comment" type="textarea" sortOrder="30"
                        showInDefault="1" showInWebsite="0" showInStore="0">
                     <label>Group → Role Map</label>
-                    <comment><![CDATA[One <code>displayName=role_id</code> per line, mapping a SCIM
-                        group to a Magento admin role id. A provisioned member gets the first
-                        matching role (admins hold a single role). Lines starting with
-                        <code>#</code> are ignored.]]></comment>
+                    <comment><![CDATA[One <code>displayName=role_id</code> per line, mapping a SCIM group to a Magento admin role id. A provisioned member gets the first matching role (admins hold a single role). Lines starting with <code>#</code> are ignored.]]></comment>
                     <depends>
                         <field id="enabled">1</field>
                     </depends>
@@ -49,8 +54,7 @@
                 <field id="default_role" translate="label comment" type="text" sortOrder="40"
                        showInDefault="1" showInWebsite="0" showInStore="0">
                     <label>Default Role Id</label>
-                    <comment><![CDATA[ACL role id assigned when a member's groups match no rule.
-                        Leave empty to deny (no role) unmapped members.]]></comment>
+                    <comment><![CDATA[ACL role id assigned when an admin's groups match no rule, including admins provisioned without groups. Leave empty to deny (no role).]]></comment>
                     <depends>
                         <field id="enabled">1</field>
                     </depends>

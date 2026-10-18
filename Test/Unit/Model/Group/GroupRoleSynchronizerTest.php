@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -10,6 +11,7 @@ use DmLab\AdminScim\Model\Config;
 use DmLab\AdminScim\Model\Group\GroupRoleSynchronizer;
 use DmLab\AdminScim\Model\Group\MemberResource;
 use DmLab\AdminScim\Model\Mapping\MappingEngine;
+use DmLab\AdminScim\Model\User\ScimUserMapper;
 use Magento\Authorization\Model\Role;
 use Magento\Authorization\Model\RoleFactory;
 use Magento\User\Model\ResourceModel\User as UserResource;
@@ -72,9 +74,10 @@ class GroupRoleSynchronizerTest extends TestCase
      *
      * @param int $userId
      * @param string|null $currentRoleId
+     * @param bool $managed whether the admin is SCIM-managed
      * @return User&MockObject
      */
-    private function user(int $userId, ?string $currentRoleId)
+    private function user(int $userId, ?string $currentRoleId, bool $managed = true)
     {
         $role = $this->createStub(Role::class);
         $role->method('getId')->willReturn($currentRoleId);
@@ -82,6 +85,10 @@ class GroupRoleSynchronizerTest extends TestCase
         $user = $this->createMock(User::class);
         $user->method('getId')->willReturn($userId);
         $user->method('getRole')->willReturn($role);
+        $user->method('getData')->willReturnMap([
+            [ScimUserMapper::MANAGED_FIELD, $managed ? '1' : '0'],
+            ['username', 'jdoe'],
+        ]);
 
         $this->userFactory->method('create')->willReturn($user);
         $this->userResource->method('load')->willReturnSelf();
@@ -193,6 +200,19 @@ class GroupRoleSynchronizerTest extends TestCase
         $this->synchronizer->syncUsers([1]);
     }
 
+    public function testLeavesUnmanagedAdminUntouched(): void
+    {
+        // A stale membership row names a local admin; its role must not change.
+        $this->withRules(['Admins' => '5']);
+        $this->memberResource->method('getGroupDisplayNamesForUser')->willReturn([]);
+        $user = $this->user(1, '2', false);
+
+        $user->expects(self::never())->method('setData');
+        $this->userResource->expects(self::never())->method('save');
+
+        $this->synchronizer->syncUsers([1]);
+    }
+
     public function testSkipsRemovedUser(): void
     {
         $this->withRules(['Admins' => '5']);
@@ -219,5 +239,86 @@ class GroupRoleSynchronizerTest extends TestCase
         $this->userResource->expects(self::once())->method('save');
 
         $this->synchronizer->syncUsers([1, 1]);
+    }
+
+    public function testUserWithoutGroupsGetsDefaultRole(): void
+    {
+        $this->withRules(['Admins' => '5'], '3');
+        $this->memberResource->method('getGroupDisplayNamesForUser')->willReturn([]);
+        $this->resolvedRoleExists(true);
+        $user = $this->user(1, null);
+
+        $user->expects(self::once())->method('setData')->with('role_id', 3);
+        $this->userResource->expects(self::once())->method('save')->with($user);
+
+        $this->synchronizer->syncUsers([1]);
+    }
+
+    public function testUserWithoutGroupsAndNoDefaultStaysRoleless(): void
+    {
+        $this->withRules([]);
+        $this->memberResource->method('getGroupDisplayNamesForUser')->willReturn([]);
+        $user = $this->user(1, null);
+
+        $user->expects(self::never())->method('setData');
+        $this->userResource->expects(self::never())->method('save');
+
+        $this->synchronizer->syncUsers([1]);
+    }
+
+    public function testReturnsRoleChange(): void
+    {
+        $this->withRules(['Admins' => '5']);
+        $this->memberResource->method('getGroupDisplayNamesForUser')->willReturn(['Admins']);
+        $this->resolvedRoleExists(true);
+        $user = $this->user(1, '2');
+        $user->expects(self::once())->method('setData')->with('role_id', 5);
+        $this->userResource->expects(self::once())->method('save');
+
+        self::assertSame(
+            [['user_id' => 1, 'userName' => 'jdoe', 'from' => 2, 'to' => 5]],
+            $this->synchronizer->syncUsers([1])
+        );
+    }
+
+    public function testReturnsRoleStrip(): void
+    {
+        $this->withRules(['Admins' => '5']);
+        $this->memberResource->method('getGroupDisplayNamesForUser')->willReturn([]);
+        $user = $this->user(1, '2');
+        $user->expects(self::once())->method('setData')->with('role_id', 0);
+        $this->userResource->expects(self::once())->method('save');
+
+        self::assertSame(
+            [['user_id' => 1, 'userName' => 'jdoe', 'from' => 2, 'to' => null]],
+            $this->synchronizer->syncUsers([1])
+        );
+    }
+
+    public function testReturnsFirstRoleGrantFromNone(): void
+    {
+        $this->withRules([], '1');
+        $this->memberResource->method('getGroupDisplayNamesForUser')->willReturn([]);
+        $this->resolvedRoleExists(true);
+        $user = $this->user(1, null);
+        $user->expects(self::once())->method('setData')->with('role_id', 1);
+        $this->userResource->expects(self::once())->method('save');
+
+        self::assertSame(
+            [['user_id' => 1, 'userName' => 'jdoe', 'from' => null, 'to' => 1]],
+            $this->synchronizer->syncUsers([1])
+        );
+    }
+
+    public function testReturnsNoChangeWhenRoleUnchanged(): void
+    {
+        $this->withRules(['Admins' => '5']);
+        $this->memberResource->method('getGroupDisplayNamesForUser')->willReturn(['Admins']);
+        $this->resolvedRoleExists(true);
+        $user = $this->user(1, '5');
+        $user->expects(self::never())->method('setData');
+        $this->userResource->expects(self::never())->method('save');
+
+        self::assertSame([], $this->synchronizer->syncUsers([1]));
     }
 }

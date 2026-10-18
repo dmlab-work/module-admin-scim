@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -15,7 +16,8 @@ use Magento\User\Model\UserFactory;
 /**
  * Read side of SCIM User provisioning: fetch a single admin user by its SCIM `id`
  * (the `admin_user.user_id`) and search the collection with the supported filter
- * subset + pagination. The write side (create/uniqueness) lives in
+ * subset + pagination. Only SCIM-managed admins are visible: a local admin is a
+ * 404 by id and absent from lists. The write side (create/uniqueness) lives in
  * {@see UserProvisioner}; this class only loads and never mutates.
  */
 class ScimUserRepository
@@ -39,7 +41,7 @@ class ScimUserRepository
      *
      * @param string $id the SCIM resource id (admin_user.user_id)
      * @return User the loaded admin user
-     * @throws ScimException 404 when no admin user carries that id
+     * @throws ScimException 404 when no SCIM-managed admin user carries that id
      */
     public function getById(string $id): User
     {
@@ -48,7 +50,7 @@ class ScimUserRepository
             $this->userResource->load($user, (int)$id);
         }
 
-        if (!$user->getId()) {
+        if (!$user->getId() || (int)$user->getData(ScimUserMapper::MANAGED_FIELD) !== 1) {
             throw ScimException::notFound(sprintf('User "%s" not found.', $id));
         }
 
@@ -71,6 +73,7 @@ class ScimUserRepository
     public function search(?string $filter, int $startIndex, int $count): array
     {
         $collection = $this->userCollectionFactory->create();
+        $collection->addFieldToFilter(ScimUserMapper::MANAGED_FIELD, 1);
 
         if ($filter !== null && $filter !== '') {
             [$field, $value] = $this->filterParser->parse($filter);

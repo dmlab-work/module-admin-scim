@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -10,6 +11,7 @@ use DmLab\AdminScim\Exception\ScimException;
 use DmLab\AdminScim\Model\Discovery\EndpointUrlBuilder;
 use DmLab\AdminScim\Model\User\ScimUserMapper;
 use Magento\User\Model\User;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 class ScimUserMapperTest extends TestCase
@@ -181,12 +183,27 @@ class ScimUserMapperTest extends TestCase
         self::assertFalse($this->mapper->extractActive(['active' => false]));
     }
 
-    public function testExtractActiveHonorsStringifiedBooleans(): void
+    /**
+     * @return array<string,array{0:mixed,1:bool}>
+     */
+    public static function activeValueProvider(): array
     {
-        self::assertFalse($this->mapper->extractActive(['active' => 'false']));
-        self::assertFalse($this->mapper->extractActive(['active' => '0']));
-        self::assertTrue($this->mapper->extractActive(['active' => 'true']));
-        self::assertTrue($this->mapper->extractActive(['active' => '1']));
+        return [
+            '"true"' => ['true', true],
+            '"True"' => ['True', true],
+            '"false"' => ['false', false],
+            '"False"' => ['False', false],
+            '"1"' => ['1', true],
+            '"0"' => ['0', false],
+            'true' => [true, true],
+            'false' => [false, false],
+        ];
+    }
+
+    #[DataProvider('activeValueProvider')]
+    public function testExtractActiveCoercesValue(mixed $value, bool $expected): void
+    {
+        self::assertSame($expected, $this->mapper->extractActive(['active' => $value]));
     }
 
     public function testExtractExternalId(): void

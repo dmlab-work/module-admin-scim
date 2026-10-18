@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -107,6 +108,34 @@ class ScimGroupPatcherTest extends TestCase
 
         self::assertSame('New', $result['group']->displayName);
         self::assertSame([3], $result['members']);
+    }
+
+    public function testPathlessRenameIgnoresReadOnlyKeys(): void
+    {
+        $result = $this->apply(new ScimGroup(5, 'Old', 'ext-5'), [7], [
+            ['op' => 'replace', 'value' => [
+                'id' => '5',
+                'displayName' => 'Ops',
+                'meta' => ['resourceType' => 'Group'],
+                'schemas' => ['urn:ietf:params:scim:schemas:core:2.0:Group'],
+            ]],
+        ]);
+
+        self::assertSame(5, $result['group']->groupId);
+        self::assertSame('Ops', $result['group']->displayName);
+        self::assertSame('ext-5', $result['group']->externalId);
+        self::assertSame([7], $result['members']);
+    }
+
+    public function testTargetedIdPathIsStillRejected(): void
+    {
+        try {
+            $this->apply(new ScimGroup(5, 'G'), [], [['op' => 'replace', 'path' => 'id', 'value' => '9']]);
+            self::fail('Expected ScimException');
+        } catch (ScimException $e) {
+            self::assertSame(400, $e->getHttpStatus());
+            self::assertSame('invalidPath', $e->getScimType());
+        }
     }
 
     public function testAddOnFilteredMemberPathIsRejected(): void

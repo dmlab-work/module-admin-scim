@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -12,16 +13,15 @@ use Magento\User\Model\User;
 /**
  * Applies a SCIM PATCH `PatchOp` (RFC 7644 §3.5.2) to a loaded `admin_user`.
  *
- * Handles the strict-RFC subset the server provisions: `active`, `userName`,
- * `externalId`, `name` (and its `givenName`/`familyName`/`formatted`
- * sub-attributes) and `emails`. `add` and `replace` are treated identically for
- * these single-valued attributes (RFC 7644 §3.5.2.1: an `add` on a single-valued
- * attribute replaces its value) — this also absorbs the Entra ADD/REPLACE
- * inconsistency for our attributes. Path-less operations (whose `value` is an
- * object of attribute→value) are supported, which additionally tolerates Entra's
- * flat complex-attribute form. IdP-specific deviations beyond this baseline are
- * normalized in `admin-scim-<idp>` plugins (Task 8), not here. Mutates the model
- * in place; persistence and uniqueness live in {@see UserProvisioner}.
+ * Stores `active`, `userName`, `externalId`, `name` (`givenName`/`familyName`/
+ * `formatted`) and `emails`; `emails[type eq "work"].value` and
+ * `emails[primary eq true].value` set the email. `add` and `replace` are identical
+ * for these single-valued attributes (RFC 7644 §3.5.2.1). Paths may carry the core
+ * User URN prefix, and the bare core URN with an object value is path-less over it.
+ * Attributes `admin_user` cannot store (other core attributes, extension schemas,
+ * unknown names, other value filters) are accepted and ignored, so one unstored
+ * attribute does not fail a whole IdP PatchOp; only malformed ops are 400. Mutates
+ * the model in place; persistence and uniqueness live in {@see UserProvisioner}.
  */
 class ScimUserPatcher
 {
@@ -30,6 +30,45 @@ class ScimUserPatcher
 
     /** admin_user.username column length. */
     private const USERNAME_MAX_LENGTH = 40;
+
+    /** `attr`, `attr.sub`, `attr[filter]`, `attr[filter].sub` (RFC 7644 §3.10, after the URN prefix). */
+    private const PATH_PATTERN = '/^([a-z][\w$-]*)(?:\[([^\[\]]+)\])?(?:\.([a-z][\w$-]*))?$/i';
+
+    /** Value filters on `emails` that select the address `admin_user.email` holds. */
+    private const EMAIL_FILTER_PATTERN = '/^\s*(?:type\s+eq\s+"work"|primary\s+eq\s+true)\s*$/i';
+
+    /** Resolved target: the core User schema itself (path-less over the value). */
+    private const TARGET_ROOT = '#root';
+
+    /** Resolved target: an attribute admin_user does not store. */
+    private const TARGET_IGNORED = '#ignored';
+
+    /** Resolved target: `emails[type eq "work"|primary eq true].value`. */
+    private const TARGET_FILTERED_EMAIL = 'emails[primary].value';
+
+    /** Stored attribute paths, lower-cased. */
+    private const STORED_TARGETS = [
+        'active',
+        'username',
+        'externalid',
+        'name',
+        'name.givenname',
+        'name.familyname',
+        'name.formatted',
+        'emails',
+    ];
+
+    /** Targets `remove` may not clear: Magento requires them on every admin. */
+    private const REQUIRED_TARGETS = [
+        self::TARGET_ROOT,
+        self::TARGET_FILTERED_EMAIL,
+        'active',
+        'username',
+        'name',
+        'name.givenname',
+        'name.familyname',
+        'emails',
+    ];
 
     /**
      * @param ScimUserMapper $mapper
@@ -44,7 +83,7 @@ class ScimUserPatcher
      *
      * @param User $user loaded admin user to mutate
      * @param array<string,mixed> $body decoded PatchOp resource
-     * @throws ScimException 400 on a malformed op, unsupported path or bad value
+     * @throws ScimException 400 on a malformed op, unparseable path or bad value
      */
     public function apply(User $user, array $body): void
     {
@@ -78,7 +117,7 @@ class ScimUserPatcher
      *
      * @param User $user
      * @param mixed $operation
-     * @throws ScimException 400 on a malformed op, unsupported path or bad value
+     * @throws ScimException 400 on a malformed op, unparseable path or bad value
      */
     private function applyOperation(User $user, mixed $operation): void
     {
@@ -107,16 +146,7 @@ class ScimUserPatcher
 
         // add / replace
         if ($path === '') {
-            $value = $operation['value'] ?? null;
-            if (!is_array($value) || array_is_list($value)) {
-                throw ScimException::badRequest(
-                    'A path-less PATCH operation requires an object "value".',
-                    'invalidValue'
-                );
-            }
-            foreach ($value as $subPath => $subValue) {
-                $this->assign($user, (string)$subPath, $subValue);
-            }
+            $this->assignPathless($user, $operation['value'] ?? null);
 
             return;
         }
@@ -131,17 +161,40 @@ class ScimUserPatcher
     }
 
     /**
-     * Set one supported attribute (identified by its SCIM path) on the user.
+     * Assign each attribute of a path-less (attribute→value object) value.
+     *
+     * @param User $user
+     * @param mixed $value
+     * @throws ScimException 400 `invalidValue` when the value is not an object
+     */
+    private function assignPathless(User $user, mixed $value): void
+    {
+        if (!is_array($value) || array_is_list($value)) {
+            throw ScimException::badRequest(
+                'A path-less PATCH operation requires an object "value".',
+                'invalidValue'
+            );
+        }
+        foreach ($value as $subPath => $subValue) {
+            $this->assign($user, (string)$subPath, $subValue);
+        }
+    }
+
+    /**
+     * Set the attribute a SCIM path resolves to; unstored attributes are ignored.
      *
      * @param User $user
      * @param string $path SCIM attribute path (case-insensitive)
      * @param mixed $value
-     * @throws ScimException 400 `invalidPath` when the path is unsupported, or
+     * @throws ScimException 400 `invalidPath` when the path is unparseable, or
      *         `invalidValue` when the value is invalid for the attribute
      */
     private function assign(User $user, string $path, mixed $value): void
     {
-        switch (strtolower($path)) {
+        switch ($this->resolve($path)) {
+            case self::TARGET_ROOT:
+                $this->assignPathless($user, $value);
+                break;
             case 'active':
                 $user->setData('is_active', $this->toBool($value) ? 1 : 0);
                 break;
@@ -177,30 +230,77 @@ class ScimUserPatcher
             case 'emails':
                 $user->setData('email', $this->mapper->extractEmail(['emails' => is_array($value) ? $value : []]));
                 break;
+            case self::TARGET_FILTERED_EMAIL:
+                $user->setData('email', $this->mapper->extractEmail(['emails' => [['value' => $value]]]));
+                break;
             default:
-                throw ScimException::badRequest(sprintf('Unsupported PATCH path "%s".', $path), 'invalidPath');
+                // TARGET_IGNORED: admin_user does not store it.
+                break;
         }
     }
 
     /**
-     * Apply the removable subset of a `remove` op.
+     * Apply a `remove` op.
      *
-     * Only `externalId` (an optional link) may be cleared; removing a
+     * `externalId` is cleared; an unstored attribute is a no-op; removing a
      * Magento-required attribute is a mutability error.
      *
      * @param User $user
      * @param string $path
-     * @throws ScimException 400 `mutability` for a non-removable attribute
+     * @throws ScimException 400 `mutability` for a required attribute, `invalidPath`
+     *         for an unparseable path
      */
     private function remove(User $user, string $path): void
     {
-        if (strtolower($path) === 'externalid') {
+        $target = $this->resolve($path);
+        if ($target === 'externalid') {
             $user->setData(ScimUserMapper::EXTERNAL_ID_FIELD, null);
 
             return;
         }
+        if (in_array($target, self::REQUIRED_TARGETS, true)) {
+            throw ScimException::badRequest(sprintf('Attribute "%s" cannot be removed.', $path), 'mutability');
+        }
+    }
 
-        throw ScimException::badRequest(sprintf('Attribute "%s" cannot be removed.', $path), 'mutability');
+    /**
+     * Resolve a SCIM path to a stored attribute target or a TARGET_* marker.
+     *
+     * @param string $path
+     * @throws ScimException 400 `invalidPath` when the path does not parse
+     */
+    private function resolve(string $path): string
+    {
+        $path = trim($path);
+        if (stripos($path, 'urn:') === 0) {
+            if (strcasecmp($path, ScimUserMapper::SCHEMA_USER) === 0) {
+                return self::TARGET_ROOT;
+            }
+            $prefix = ScimUserMapper::SCHEMA_USER . ':';
+            if (strncasecmp($path, $prefix, strlen($prefix)) !== 0) {
+                // Extension schema (e.g. enterprise User): nothing in admin_user.
+                return self::TARGET_IGNORED;
+            }
+            $path = substr($path, strlen($prefix));
+        }
+
+        if (preg_match(self::PATH_PATTERN, $path, $m) !== 1) {
+            throw ScimException::badRequest(sprintf('Invalid PATCH path "%s".', $path), 'invalidPath');
+        }
+        $attribute = strtolower($m[1]);
+        $filter = $m[2] ?? '';
+        $sub = strtolower($m[3] ?? '');
+
+        if ($filter !== '') {
+            return $attribute === 'emails' && $sub === 'value'
+                && preg_match(self::EMAIL_FILTER_PATTERN, $filter) === 1
+                ? self::TARGET_FILTERED_EMAIL
+                : self::TARGET_IGNORED;
+        }
+
+        $target = $sub === '' ? $attribute : $attribute . '.' . $sub;
+
+        return in_array($target, self::STORED_TARGETS, true) ? $target : self::TARGET_IGNORED;
     }
 
     /**

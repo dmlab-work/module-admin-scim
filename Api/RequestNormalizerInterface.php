@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -16,7 +17,8 @@ namespace DmLab\AdminScim\Api;
  * to absorb that IdP's deviations (Entra flat complex attrs, `value` in group-member
  * remove, ADD/REPLACE inconsistency) — the core never learns IdP specifics.
  *
- * Deliberately minimal: the real shape is validated when `admin-scim-azure` lands.
+ * The di item key is the provider code (`okta`, `azure`, `google`); the core invokes
+ * a normalizer only while its provider is active (configured, or the only one registered).
  */
 interface RequestNormalizerInterface
 {
@@ -28,7 +30,7 @@ interface RequestNormalizerInterface
      * Normalize a decoded SCIM request body toward strict RFC shape.
      *
      * Implementations must be pure and total: return the payload unchanged when
-     * the request does not concern this IdP, never throw on unexpected input.
+     * nothing needs rewriting, never throw on unexpected input.
      *
      * @param string $resourceType one of the `RESOURCE_*` constants
      * @param string $operation the upper-case HTTP method (`POST`, `PUT`, `PATCH`)

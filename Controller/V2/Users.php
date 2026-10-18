@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -26,8 +27,8 @@ use Psr\Log\LoggerInterface;
  * `/admin-scim/v2/Users` — the SCIM User collection endpoint.
  *
  * Serves POST (create), GET (read one by `id`, or list with the supported
- * filter subset + pagination), PUT (full replace) and PATCH (partial ops incl.
- * `active` deprovisioning). Unsupported verbs answer `501 Not Implemented`; a
+ * filter subset + pagination), PUT (full replace), PATCH (partial ops incl.
+ * `active` deprovisioning) and DELETE (hard delete, 204). Unsupported verbs answer `501 Not Implemented`; a
  * single action class serves every verb because Magento routes the whole
  * `Users` path here.
  */
@@ -73,6 +74,7 @@ class Users extends AbstractScim
             'GET' => $this->read(),
             'PUT' => $this->replace(),
             'PATCH' => $this->patch(),
+            'DELETE' => $this->delete(),
             default => throw ScimException::notImplemented(),
         };
     }
@@ -107,6 +109,16 @@ class Users extends AbstractScim
         $user = $this->provisioner->patch($this->requireResourceId(), $this->parseBody());
 
         return $this->response->json($this->mapper->toResource($user));
+    }
+
+    /**
+     * `DELETE /Users/{id}` hard-deletes the admin, answering `204 No Content`.
+     */
+    private function delete(): ResultInterface
+    {
+        $this->provisioner->delete($this->requireResourceId());
+
+        return $this->response->noContent();
     }
 
     /**
@@ -164,7 +176,7 @@ class Users extends AbstractScim
     }
 
     /**
-     * The `{id}` path segment, required for single-resource verbs (PUT/PATCH).
+     * The `{id}` path segment, required for single-resource verbs (PUT/PATCH/DELETE).
      *
      * @throws ScimException 400 `noTarget` when the request targets the collection
      */

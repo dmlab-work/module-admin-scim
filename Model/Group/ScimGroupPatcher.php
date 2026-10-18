@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -17,7 +18,8 @@ use DmLab\AdminScim\Exception\ScimException;
  * collection, `remove` with a value-filtered path (`members[value eq "id"]`)
  * drops one member and a path-less `remove` clears all. `add`/`replace` treat a
  * single-valued attribute identically (RFC §3.5.2.1). Path-less operations (whose
- * `value` is an attribute→value object) are supported. IdP-specific deviations
+ * `value` is an attribute→value object) are supported; their read-only `id`, `meta`
+ * and `schemas` keys are ignored. IdP-specific deviations
  * beyond this baseline (e.g. Entra's member-remove quirk) are normalized in
  * `admin-scim-<idp>` plugins (Task 8), not here. Mutates the group model and the
  * `$memberIds` array in place; persistence and role sync live in
@@ -27,6 +29,9 @@ class ScimGroupPatcher
 {
     /** `members[value eq "<id>"]`, operator case-insensitive. */
     private const MEMBER_PATH_PATTERN = '/^members\[\s*value\s+eq\s+"([^"]+)"\s*\]$/i';
+
+    /** Read-only keys ignored in a path-less value (Okta's rename sends `id`). */
+    private const READ_ONLY_KEYS = ['id', 'meta', 'schemas'];
 
     /**
      * @param ScimGroupMapper $mapper
@@ -110,6 +115,9 @@ class ScimGroupPatcher
                 );
             }
             foreach ($value as $subPath => $subValue) {
+                if (in_array(strtolower((string)$subPath), self::READ_ONLY_KEYS, true)) {
+                    continue;
+                }
                 $this->assign($group, $memberIds, $op, (string)$subPath, $subValue);
             }
 

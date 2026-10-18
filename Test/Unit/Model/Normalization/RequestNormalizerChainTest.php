@@ -1,48 +1,86 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
 namespace DmLab\AdminScim\Test\Unit\Model\Normalization;
 
 use DmLab\AdminScim\Api\RequestNormalizerInterface;
+use DmLab\AdminScim\Model\Config;
 use DmLab\AdminScim\Model\Normalization\RequestNormalizerChain;
 use PHPUnit\Framework\TestCase;
 
 class RequestNormalizerChainTest extends TestCase
 {
+    private function chain(?string $provider, array $normalizers = []): RequestNormalizerChain
+    {
+        $config = $this->createStub(Config::class);
+        $config->method('getProvider')->willReturn($provider);
+
+        return new RequestNormalizerChain($config, $normalizers);
+    }
+
+    private function apply(RequestNormalizerChain $chain): array
+    {
+        return $chain->apply(RequestNormalizerInterface::RESOURCE_GROUP, 'PATCH', ['tags' => []]);
+    }
+
     public function testEmptyChainPassesPayloadThroughUnchanged(): void
     {
-        $chain = new RequestNormalizerChain();
         $payload = ['userName' => 'jane.doe', 'active' => true];
 
         self::assertSame(
             $payload,
-            $chain->apply(RequestNormalizerInterface::RESOURCE_USER, 'POST', $payload)
+            $this->chain(null)->apply(RequestNormalizerInterface::RESOURCE_USER, 'POST', $payload)
         );
     }
 
-    public function testRegisteredNormalizerRewritesPayload(): void
+    public function testConfiguredProviderRunsOnlyItsNormalizer(): void
     {
-        $chain = new RequestNormalizerChain([$this->upperCaseUserNameNormalizer()]);
+        $chain = $this->chain('azure', [
+            'okta' => $this->appendTagNormalizer('okta'),
+            'azure' => $this->appendTagNormalizer('azure'),
+            'google' => $this->appendTagNormalizer('google'),
+        ]);
 
-        self::assertSame(
-            ['userName' => 'JANE.DOE'],
-            $chain->apply(RequestNormalizerInterface::RESOURCE_USER, 'POST', ['userName' => 'jane.doe'])
-        );
+        self::assertSame(['tags' => ['azure']], $this->apply($chain));
     }
 
-    public function testNormalizersRunInOrderFeedingEachOutputToTheNext(): void
+    public function testUnsetProviderRunsTheOnlyRegisteredNormalizer(): void
     {
-        $appendA = $this->appendTagNormalizer('a');
-        $appendB = $this->appendTagNormalizer('b');
-        $chain = new RequestNormalizerChain([$appendA, $appendB]);
+        $chain = $this->chain(null, ['okta' => $this->appendTagNormalizer('okta')]);
 
-        self::assertSame(
-            ['tags' => ['a', 'b']],
-            $chain->apply(RequestNormalizerInterface::RESOURCE_GROUP, 'PATCH', ['tags' => []])
-        );
+        self::assertSame(['tags' => ['okta']], $this->apply($chain));
+    }
+
+    public function testUnsetProviderWithSeveralRegisteredRunsNone(): void
+    {
+        $chain = $this->chain(null, [
+            'okta' => $this->appendTagNormalizer('okta'),
+            'azure' => $this->appendTagNormalizer('azure'),
+        ]);
+
+        self::assertSame(['tags' => []], $this->apply($chain));
+    }
+
+    public function testUnknownProviderRunsNone(): void
+    {
+        $chain = $this->chain('onelogin', ['okta' => $this->appendTagNormalizer('okta')]);
+
+        self::assertSame(['tags' => []], $this->apply($chain));
+    }
+
+    public function testProviderCodesPreserveDiKeysInOrder(): void
+    {
+        $chain = $this->chain(null, [
+            'okta' => $this->appendTagNormalizer('okta'),
+            'azure' => $this->appendTagNormalizer('azure'),
+        ]);
+
+        self::assertSame(['okta', 'azure'], $chain->getProviderCodes());
+        self::assertSame([], $this->chain(null)->getProviderCodes());
     }
 
     public function testNormalizerReceivesResourceTypeAndOperation(): void
@@ -62,8 +100,7 @@ class RequestNormalizerChainTest extends TestCase
             }
         };
 
-        (new RequestNormalizerChain([$recorder]))
-            ->apply(RequestNormalizerInterface::RESOURCE_GROUP, 'PATCH', []);
+        $this->apply($this->chain('rec', ['rec' => $recorder]));
 
         self::assertSame(
             ['resourceType' => RequestNormalizerInterface::RESOURCE_GROUP, 'operation' => 'PATCH'],
@@ -75,20 +112,7 @@ class RequestNormalizerChainTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        new RequestNormalizerChain([new \stdClass()]);
-    }
-
-    private function upperCaseUserNameNormalizer(): RequestNormalizerInterface
-    {
-        return new class implements RequestNormalizerInterface {
-            public function normalize(string $resourceType, string $operation, array $payload): array
-            {
-                if (isset($payload['userName'])) {
-                    $payload['userName'] = strtoupper((string)$payload['userName']);
-                }
-                return $payload;
-            }
-        };
+        $this->chain(null, ['bad' => new \stdClass()]);
     }
 
     private function appendTagNormalizer(string $tag): RequestNormalizerInterface

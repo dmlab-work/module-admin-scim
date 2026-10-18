@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -9,6 +10,7 @@ namespace DmLab\AdminScim\Test\Unit\Controller\V2;
 use DmLab\AdminScim\Controller\V2\Groups;
 use DmLab\AdminScim\Exception\ScimException;
 use DmLab\AdminScim\Model\Auth\BearerTokenAuthenticator;
+use DmLab\AdminScim\Model\Config;
 use DmLab\AdminScim\Model\Group\GroupProvisioner;
 use DmLab\AdminScim\Model\Group\MemberResource;
 use DmLab\AdminScim\Model\Group\ScimGroup;
@@ -20,6 +22,7 @@ use DmLab\AdminScim\Model\Response\ScimResponse;
 use Magento\Framework\App\Request\Http;
 use Magento\Framework\Controller\Result\Raw;
 use Magento\Framework\Serialize\Serializer\Json;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -75,7 +78,7 @@ class GroupsTest extends TestCase
             $this->memberResource,
             new ListResponseBuilder(),
             new Json(),
-            new RequestNormalizerChain()
+            new RequestNormalizerChain($this->createStub(Config::class))
         );
     }
 
@@ -246,23 +249,93 @@ class GroupsTest extends TestCase
         self::assertSame($raw, $this->controller->execute());
     }
 
-    public function testPutReturns501(): void
+    public function testPutReplacesGroupAndReturnsResource(): void
+    {
+        $payload = ['displayName' => 'Ops', 'members' => [['value' => '5']]];
+        $replaced = new ScimGroup(42, 'Ops');
+        $document = ['schemas' => ['urn'], 'id' => '42'];
+        $raw = $this->createStub(Raw::class);
+
+        $this->request->method('getMethod')->willReturn('PUT');
+        $this->request->method('getPathInfo')->willReturn('/admin-scim/v2/Groups/42');
+        $this->request->method('getContent')->willReturn(json_encode($payload));
+
+        $this->provisioner->expects(self::once())->method('replace')->with('42', $payload)->willReturn($replaced);
+        $this->provisioner->expects(self::never())->method('patch');
+        $this->repository->expects(self::never())->method('getById');
+        $this->mapper->method('toResource')->willReturn($document);
+        $this->response->expects(self::once())->method('json')->with($document, 200)->willReturn($raw);
+        $this->logger->expects(self::never())->method('critical');
+
+        self::assertSame($raw, $this->controller->execute());
+    }
+
+    public function testDeleteRemovesGroupAndReturns204(): void
     {
         $raw = $this->createStub(Raw::class);
-        $this->request->method('getMethod')->willReturn('PUT');
+        $this->request->method('getMethod')->willReturn('DELETE');
+        $this->request->method('getPathInfo')->willReturn('/admin-scim/v2/Groups/42');
+
+        $this->provisioner->expects(self::once())->method('delete')->with('42');
+        $this->response->expects(self::once())->method('noContent')->willReturn($raw);
+        $this->response->expects(self::never())->method('error');
+        $this->repository->expects(self::never())->method('getById');
+        $this->logger->expects(self::never())->method('critical');
+
+        self::assertSame($raw, $this->controller->execute());
+    }
+
+    /**
+     * @return array<string,array{0:string}>
+     */
+    public static function singleResourceVerbs(): array
+    {
+        return ['PUT' => ['PUT'], 'DELETE' => ['DELETE']];
+    }
+
+    #[DataProvider('singleResourceVerbs')]
+    public function testSingleResourceVerbWithoutIdReturns400(string $method): void
+    {
+        $raw = $this->createStub(Raw::class);
+        $this->request->method('getMethod')->willReturn($method);
+        $this->request->method('getPathInfo')->willReturn('/admin-scim/v2/Groups');
+        $this->request->method('getContent')->willReturn('{"displayName":"Ops"}');
 
         $this->expectNoProvisioning();
+        $this->provisioner->expects(self::never())->method('replace');
+        $this->provisioner->expects(self::never())->method('delete');
         $this->response->expects(self::once())->method('error')
-            ->with(self::callback(static fn (ScimException $e): bool => $e->getHttpStatus() === 501))
+            ->with(self::callback(
+                static fn (ScimException $e): bool =>
+                    $e->getHttpStatus() === 400 && $e->getScimType() === 'noTarget'
+            ))
             ->willReturn($raw);
 
         self::assertSame($raw, $this->controller->execute());
     }
 
-    public function testDeleteReturns501(): void
+    public function testDeleteOfUnknownGroupReturns404(): void
     {
         $raw = $this->createStub(Raw::class);
         $this->request->method('getMethod')->willReturn('DELETE');
+        $this->request->method('getPathInfo')->willReturn('/admin-scim/v2/Groups/999');
+
+        $this->provisioner->expects(self::once())->method('delete')->with('999')
+            ->willThrowException(ScimException::notFound('Group "999" not found.'));
+        $this->response->expects(self::never())->method('noContent');
+        $this->response->expects(self::once())->method('error')
+            ->with(self::callback(static fn (ScimException $e): bool => $e->getHttpStatus() === 404))
+            ->willReturn($raw);
+        $this->repository->expects(self::never())->method('getById');
+        $this->logger->expects(self::never())->method('critical');
+
+        self::assertSame($raw, $this->controller->execute());
+    }
+
+    public function testUnsupportedMethodReturns501(): void
+    {
+        $raw = $this->createStub(Raw::class);
+        $this->request->method('getMethod')->willReturn('HEAD');
 
         $this->expectNoProvisioning();
         $this->response->expects(self::once())->method('error')

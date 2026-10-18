@@ -1,12 +1,16 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
 namespace DmLab\AdminScim\Model\User;
 
 use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\Audit\AuditLogger;
+use DmLab\AdminScim\Model\Group\GroupRoleSynchronizer;
+use DmLab\AdminScim\Model\WriteLock;
 use Magento\Framework\DB\Adapter\DuplicateException;
 use Magento\Framework\Exception\AlreadyExistsException;
 use Magento\Framework\Math\Random;
@@ -18,15 +22,20 @@ use Magento\User\Model\UserFactory;
 /**
  * Provisions Magento `admin_user` rows from SCIM User payloads.
  *
- * Write side of User provisioning: create, PUT (full replace) and PATCH
+ * Write side of User provisioning: create, PUT (full replace), PATCH
  * (partial ops, incl. `active=false` deprovisioning / `active=true`
- * reactivation). An admin is keyed on the SCIM `userName` (mapped to
+ * reactivation) and DELETE (hard delete). An admin is keyed on the SCIM `userName` (mapped to
  * `admin_user.username`) and, when supplied, linked to its IdP resource via the
  * `externalId` column. Both must be unique — a collision is a SCIM `409`
  * `uniqueness` per RFC 7644 §3.3 — so a replayed create never silently forks a
  * second account and an update never steals another admin's identifier. The
  * account password is random: login is via SSO, never this credential, but a
- * valid value is required to persist a new row.
+ * valid value is required to persist a new row. Created admins are flagged
+ * SCIM-managed; PUT/PATCH/DELETE reach only managed admins (via the repository), while
+ * uniqueness is checked against every admin, so a clash with a local one is 409.
+ * Every write re-syncs the admin's role, so one with no mapped group gets
+ * `default_role` even when the IdP pushes no groups. Every write runs under the
+ * {@see WriteLock} and is audit-logged after it commits.
  */
 class UserProvisioner
 {
@@ -38,6 +47,9 @@ class UserProvisioner
      * @param Random $random
      * @param ScimUserRepository $repository
      * @param ScimUserPatcher $patcher
+     * @param GroupRoleSynchronizer $roleSynchronizer
+     * @param AuditLogger $auditLogger
+     * @param WriteLock $writeLock
      */
     public function __construct(
         private readonly ScimUserMapper $mapper,
@@ -46,7 +58,10 @@ class UserProvisioner
         private readonly UserCollectionFactory $userCollectionFactory,
         private readonly Random $random,
         private readonly ScimUserRepository $repository,
-        private readonly ScimUserPatcher $patcher
+        private readonly ScimUserPatcher $patcher,
+        private readonly GroupRoleSynchronizer $roleSynchronizer,
+        private readonly AuditLogger $auditLogger,
+        private readonly WriteLock $writeLock
     ) {
     }
 
@@ -59,6 +74,16 @@ class UserProvisioner
      *         or externalId that already exists
      */
     public function create(array $payload): User
+    {
+        return $this->writeLock->run(fn (): User => $this->doCreate($payload));
+    }
+
+    /**
+     * Create under the write lock.
+     *
+     * @param array<string,mixed> $payload
+     */
+    private function doCreate(array $payload): User
     {
         $userName = $this->mapper->extractUserName($payload);
         $email = $this->mapper->extractEmail($payload);
@@ -85,8 +110,11 @@ class UserProvisioner
             'is_active' => $this->mapper->extractActive($payload) ? 1 : 0,
             'interface_locale' => 'en_US',
             ScimUserMapper::EXTERNAL_ID_FIELD => $externalId,
+            ScimUserMapper::MANAGED_FIELD => 1,
         ]);
-        $this->persist($user);
+        $roleChanges = $this->write($user);
+        $this->auditLogger->log('user.create', $this->auditContext($user));
+        $this->logRoleChanges($roleChanges);
 
         return $user;
     }
@@ -105,6 +133,17 @@ class UserProvisioner
      *         userName or externalId already held by another admin
      */
     public function replace(string $id, array $payload): User
+    {
+        return $this->writeLock->run(fn (): User => $this->doReplace($id, $payload));
+    }
+
+    /**
+     * Replace under the write lock.
+     *
+     * @param string $id
+     * @param array<string,mixed> $payload
+     */
+    private function doReplace(string $id, array $payload): User
     {
         $user = $this->repository->getById($id);
 
@@ -133,7 +172,9 @@ class UserProvisioner
             'is_active' => $this->mapper->extractActive($payload) ? 1 : 0,
             ScimUserMapper::EXTERNAL_ID_FIELD => $externalId,
         ]);
-        $this->persist($user);
+        $roleChanges = $this->write($user);
+        $this->auditLogger->log('user.replace', $this->auditContext($user));
+        $this->logRoleChanges($roleChanges);
 
         return $user;
     }
@@ -154,7 +195,19 @@ class UserProvisioner
      */
     public function patch(string $id, array $body): User
     {
+        return $this->writeLock->run(fn (): User => $this->doPatch($id, $body));
+    }
+
+    /**
+     * Patch under the write lock.
+     *
+     * @param string $id
+     * @param array<string,mixed> $body
+     */
+    private function doPatch(string $id, array $body): User
+    {
         $user = $this->repository->getById($id);
+        $activeBefore = (bool)(int)$user->getData('is_active');
         $this->patcher->apply($user, $body);
 
         $currentId = (int)$user->getId();
@@ -179,14 +232,76 @@ class UserProvisioner
                 $currentId
             );
         }
-        $this->persist($user);
+        $roleChanges = $this->write($user);
+        $this->auditLogger->log('user.patch', $this->auditContext($user) + [
+            'active_before' => $activeBefore,
+            'active_after' => (bool)(int)$user->getData('is_active'),
+        ]);
+        $this->logRoleChanges($roleChanges);
 
         return $user;
     }
 
     /**
-     * Persist the admin user, mapping a concurrent duplicate-key insert to a 409.
+     * Hard-delete a SCIM-managed admin user (DELETE).
      *
+     * A hard delete so a later GET is a 404 (RFC 7644 §3.6) and re-provisioning
+     * the same `userName` does not 409 on a leftover row. The core resource model
+     * also drops the admin's role rows; group membership rows cascade via FK.
+     *
+     * @param string $id the SCIM resource id (admin_user.user_id)
+     * @throws ScimException 404 when absent or not SCIM-managed, 500 when the
+     *         resource model reports a failed delete
+     */
+    public function delete(string $id): void
+    {
+        $this->writeLock->run(fn () => $this->doDelete($id));
+    }
+
+    /**
+     * Delete under the write lock.
+     *
+     * @param string $id
+     */
+    private function doDelete(string $id): void
+    {
+        $user = $this->repository->getById($id);
+        $context = $this->auditContext($user);
+        // The core resource model rolls back and returns false instead of throwing.
+        if ($this->userResource->delete($user) === false) {
+            throw ScimException::internal('Failed to delete the user.');
+        }
+        $this->auditLogger->log('user.delete', $context);
+    }
+
+    /**
+     * Audit committed role changes.
+     *
+     * @param array<int,array<string,mixed>> $roleChanges
+     */
+    private function logRoleChanges(array $roleChanges): void
+    {
+        foreach ($roleChanges as $change) {
+            $this->auditLogger->log('role.change', $change);
+        }
+    }
+
+    /**
+     * Audit context identifying the admin user.
+     *
+     * @param User $user
+     * @return array<string,mixed>
+     */
+    private function auditContext(User $user): array
+    {
+        return ['user_id' => (int)$user->getId(), 'userName' => (string)$user->getData('username')];
+    }
+
+    /**
+     * Persist the admin user and re-sync its role as one unit.
+     *
+     * A failed role sync must not leave a saved admin whose retry then 409s.
+     * A concurrent duplicate-key insert maps to a 409.
      * The {@see assertUnique} pre-checks catch the common collision, but a request
      * that races another can still slip a duplicate `username`/`externalId` past
      * them and hit a DB unique index (core `ADMIN_USER_USERNAME`, this module's
@@ -200,14 +315,24 @@ class UserProvisioner
      * `_checkUnique` throws the same), so both must be caught.
      *
      * @param User $user
+     * @return array<int,array<string,mixed>> committed `role.change` audit contexts
      * @throws ScimException 409 `uniqueness` on a duplicate-key violation
      */
-    private function persist(User $user): void
+    private function write(User $user): array
     {
+        $this->userResource->beginTransaction();
         try {
             $this->userResource->save($user);
+            $roleChanges = $this->roleSynchronizer->syncUsers([(int)$user->getId()]);
+            $this->userResource->commit();
+
+            return $roleChanges;
         } catch (AlreadyExistsException | DuplicateException $e) {
+            $this->userResource->rollBack();
             throw ScimException::conflict('A user with this userName or externalId already exists.');
+        } catch (\Throwable $e) {
+            $this->userResource->rollBack();
+            throw $e;
         }
     }
 

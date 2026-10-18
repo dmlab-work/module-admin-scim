@@ -1,23 +1,28 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
 namespace DmLab\AdminScim\Model\Group;
 
 use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\Audit\AuditLogger;
+use DmLab\AdminScim\Model\WriteLock;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Adapter\DuplicateException;
 
 /**
  * Provisions SCIM Groups and keeps admin ACL roles in step with their membership.
  *
- * Write side of Group provisioning: create (POST) and PATCH (add/replace/remove of
- * displayName, externalId and members). `displayName` and `externalId` are unique
- * — a collision is a SCIM `409` `uniqueness` (RFC 7644 §3.3). Every membership
- * change re-derives the affected admins' ACL role via {@see GroupRoleSynchronizer}
- * so assigning/unassigning a group grants/revokes admin access with no login.
+ * Write side of Group provisioning: create (POST), replace (PUT), PATCH
+ * (add/replace/remove of displayName, externalId and members) and delete (DELETE).
+ * `displayName` and `externalId` are unique — a collision is a SCIM `409`
+ * `uniqueness` (RFC 7644 §3.3). Every membership change re-derives the affected
+ * admins' ACL role via {@see GroupRoleSynchronizer} so assigning/unassigning a
+ * group grants/revokes admin access with no login. Every write runs under the
+ * {@see WriteLock} and is audit-logged after it commits.
  */
 class GroupProvisioner
 {
@@ -29,6 +34,8 @@ class GroupProvisioner
      * @param MemberResource $memberResource
      * @param GroupRoleSynchronizer $roleSynchronizer
      * @param ResourceConnection $resource
+     * @param AuditLogger $auditLogger
+     * @param WriteLock $writeLock
      */
     public function __construct(
         private readonly ScimGroupMapper $mapper,
@@ -37,7 +44,9 @@ class GroupProvisioner
         private readonly ScimGroupPatcher $patcher,
         private readonly MemberResource $memberResource,
         private readonly GroupRoleSynchronizer $roleSynchronizer,
-        private readonly ResourceConnection $resource
+        private readonly ResourceConnection $resource,
+        private readonly AuditLogger $auditLogger,
+        private readonly WriteLock $writeLock
     ) {
     }
 
@@ -51,6 +60,16 @@ class GroupProvisioner
      */
     public function create(array $payload): ScimGroup
     {
+        return $this->writeLock->run(fn (): ScimGroup => $this->doCreate($payload));
+    }
+
+    /**
+     * Create under the write lock.
+     *
+     * @param array<string,mixed> $payload
+     */
+    private function doCreate(array $payload): ScimGroup
+    {
         $displayName = $this->mapper->extractDisplayName($payload);
         $externalId = $this->mapper->extractExternalId($payload);
         $memberIds = $this->mapper->extractMemberIds($payload);
@@ -62,23 +81,9 @@ class GroupProvisioner
         $this->assertMembersExist($memberIds);
 
         $group = new ScimGroup(null, $displayName, $externalId);
-
-        // Group row, membership and role sync are one unit: a mid-sequence failure
-        // must not leave a persisted group whose retry then collides on uniqueness.
-        $connection = $this->resource->getConnection();
-        $connection->beginTransaction();
-        try {
-            $this->groupResource->save($group);
-            $this->memberResource->setMembers((int)$group->groupId, $memberIds);
-            $this->roleSynchronizer->syncUsers($memberIds);
-            $connection->commit();
-        } catch (DuplicateException $e) {
-            $connection->rollBack();
-            throw ScimException::conflict('A group with this displayName or externalId already exists.');
-        } catch (\Throwable $e) {
-            $connection->rollBack();
-            throw $e;
-        }
+        $roleChanges = $this->write($group, $memberIds, $memberIds);
+        $this->auditLogger->log('group.create', $this->auditContext($group, [], $memberIds));
+        $this->logRoleChanges($roleChanges);
 
         return $group;
     }
@@ -98,13 +103,25 @@ class GroupProvisioner
      */
     public function patch(string $id, array $body): ScimGroup
     {
+        return $this->writeLock->run(fn (): ScimGroup => $this->doPatch($id, $body));
+    }
+
+    /**
+     * Patch under the write lock.
+     *
+     * @param string $id
+     * @param array<string,mixed> $body
+     */
+    private function doPatch(string $id, array $body): ScimGroup
+    {
         $group = $this->repository->getById($id);
         $groupId = (int)$group->groupId;
 
         $before = $this->memberResource->getUserIds($groupId);
         $members = $before;
         $this->patcher->apply($group, $members, $body);
-        $this->assertMembersExist($members);
+        // Only new ids: a stale pre-0.2.0 row naming an unmanaged admin must not block every PATCH.
+        $this->assertMembersExist(array_diff($members, $before));
 
         $this->assertUnique(
             'display_name',
@@ -121,13 +138,126 @@ class GroupProvisioner
             );
         }
 
+        $roleChanges = $this->write($group, $members, [...$before, ...$members]);
+        $this->auditLogger->log('group.patch', $this->auditContext($group, $before, $members));
+        $this->logRoleChanges($roleChanges);
+
+        return $group;
+    }
+
+    /**
+     * Replace a group's displayName, externalId and members (PUT).
+     *
+     * Every admin in the old or new membership has its ACL role re-derived.
+     *
+     * @param string $id the SCIM resource id (dmlab_scim_group.group_id)
+     * @param array<string,mixed> $payload decoded SCIM Group resource
+     * @return ScimGroup the replaced group
+     * @throws ScimException 404 when absent, 400 on invalid attributes or unknown
+     *         members, 409 on a displayName or externalId held by another group
+     */
+    public function replace(string $id, array $payload): ScimGroup
+    {
+        return $this->writeLock->run(fn (): ScimGroup => $this->doReplace($id, $payload));
+    }
+
+    /**
+     * Replace under the write lock.
+     *
+     * @param string $id
+     * @param array<string,mixed> $payload
+     */
+    private function doReplace(string $id, array $payload): ScimGroup
+    {
+        $group = $this->repository->getById($id);
+        $groupId = (int)$group->groupId;
+
+        $displayName = $this->mapper->extractDisplayName($payload);
+        $externalId = $this->mapper->extractExternalId($payload);
+        $memberIds = $this->mapper->extractMemberIds($payload);
+
+        $this->assertUnique('display_name', $displayName, 'A group with this displayName already exists.', $groupId);
+        if ($externalId !== null) {
+            $this->assertUnique(
+                'external_id',
+                $externalId,
+                'A group with this externalId already exists.',
+                $groupId
+            );
+        }
+        $this->assertMembersExist($memberIds);
+
+        $before = $this->memberResource->getUserIds($groupId);
+        $group->displayName = $displayName;
+        $group->externalId = $externalId;
+
+        $roleChanges = $this->write($group, $memberIds, [...$before, ...$memberIds]);
+        $this->auditLogger->log('group.replace', $this->auditContext($group, $before, $memberIds));
+        $this->logRoleChanges($roleChanges);
+
+        return $group;
+    }
+
+    /**
+     * Delete a group (DELETE); its former members lose the group's role.
+     *
+     * @param string $id the SCIM resource id (dmlab_scim_group.group_id)
+     * @throws ScimException 404 when absent
+     */
+    public function delete(string $id): void
+    {
+        $this->writeLock->run(fn () => $this->doDelete($id));
+    }
+
+    /**
+     * Delete under the write lock.
+     *
+     * @param string $id
+     */
+    private function doDelete(string $id): void
+    {
+        $group = $this->repository->getById($id);
+        $groupId = (int)$group->groupId;
+        $before = $this->memberResource->getUserIds($groupId);
+
+        $connection = $this->resource->getConnection();
+        $connection->beginTransaction();
+        try {
+            $this->memberResource->removeAllForGroup($groupId);
+            $this->groupResource->delete($groupId);
+            $roleChanges = $this->roleSynchronizer->syncUsers($before);
+            $connection->commit();
+        } catch (\Throwable $e) {
+            $connection->rollBack();
+            throw $e;
+        }
+        $this->auditLogger->log('group.delete', $this->auditContext($group, $before, []));
+        $this->logRoleChanges($roleChanges);
+    }
+
+    /**
+     * Save the group, set its members and re-sync roles as one unit.
+     *
+     * A mid-sequence failure must not leave a persisted group whose retry then
+     * collides on uniqueness.
+     *
+     * @param ScimGroup $group
+     * @param int[] $members the group's full membership after the write
+     * @param int[] $syncIds admins whose role must be re-derived
+     * @return array<int,array<string,mixed>> committed `role.change` audit contexts
+     * @throws ScimException 409 on a duplicate displayName or externalId
+     */
+    private function write(ScimGroup $group, array $members, array $syncIds): array
+    {
         $connection = $this->resource->getConnection();
         $connection->beginTransaction();
         try {
             $this->groupResource->save($group);
-            $this->memberResource->setMembers($groupId, $members);
-            $this->roleSynchronizer->syncUsers([...$before, ...$members]);
+            $this->memberResource->setMembers((int)$group->groupId, $members);
+            $roleChanges = $this->roleSynchronizer->syncUsers($syncIds);
             $connection->commit();
+
+            return $roleChanges;
         } catch (DuplicateException $e) {
             $connection->rollBack();
             throw ScimException::conflict('A group with this displayName or externalId already exists.');
@@ -135,8 +265,36 @@ class GroupProvisioner
             $connection->rollBack();
             throw $e;
         }
+    }
 
-        return $group;
+    /**
+     * Audit committed role changes.
+     *
+     * @param array<int,array<string,mixed>> $roleChanges
+     */
+    private function logRoleChanges(array $roleChanges): void
+    {
+        foreach ($roleChanges as $change) {
+            $this->auditLogger->log('role.change', $change);
+        }
+    }
+
+    /**
+     * Audit context identifying the group and its membership change.
+     *
+     * @param ScimGroup $group
+     * @param int[] $before member user ids before the write
+     * @param int[] $after member user ids after the write
+     * @return array<string,mixed>
+     */
+    private function auditContext(ScimGroup $group, array $before, array $after): array
+    {
+        return [
+            'group_id' => (int)$group->groupId,
+            'displayName' => $group->displayName,
+            'members_added' => array_values(array_unique(array_diff($after, $before))),
+            'members_removed' => array_values(array_unique(array_diff($before, $after))),
+        ];
     }
 
     /**

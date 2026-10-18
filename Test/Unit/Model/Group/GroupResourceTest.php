@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -90,6 +91,14 @@ class GroupResourceTest extends TestCase
             ->with('dmlab_scim_group', ['display_name' => 'Renamed', 'external_id' => null], self::anything());
 
         $this->resource->save($group);
+    }
+
+    public function testDeleteRemovesRowById(): void
+    {
+        $this->connection->expects(self::once())->method('delete')
+            ->with('dmlab_scim_group', ['group_id = ?' => 10]);
+
+        $this->resource->delete(10);
     }
 
     public function testFindConflictIdReturnsConflictingId(): void

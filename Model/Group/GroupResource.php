@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -65,6 +66,16 @@ class GroupResource
         }
 
         $connection->update($this->table(), $data, ['group_id = ?' => $group->groupId]);
+    }
+
+    /**
+     * Delete a group row; a no-op when absent.
+     *
+     * @param int $groupId
+     */
+    public function delete(int $groupId): void
+    {
+        $this->resource->getConnection()->delete($this->table(), ['group_id = ?' => $groupId]);
     }
 
     /**

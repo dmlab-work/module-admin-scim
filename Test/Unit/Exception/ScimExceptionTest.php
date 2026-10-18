@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -34,6 +35,13 @@ class ScimExceptionTest extends TestCase
         self::assertSame([409, 'uniqueness'], $this->pair(ScimException::conflict('dup')));
         self::assertSame([500, null], $this->pair(ScimException::internal()));
         self::assertSame([501, null], $this->pair(ScimException::notImplemented()));
+        self::assertSame([429, null], $this->pair(ScimException::tooManyRequests(900)));
+    }
+
+    public function testRetryAfterOnlyOnTooManyRequests(): void
+    {
+        self::assertSame(900, ScimException::tooManyRequests(900)->getRetryAfter());
+        self::assertNull(ScimException::unauthorized()->getRetryAfter());
     }
 
     public function testPreservesPreviousThrowable(): void

@@ -1,12 +1,14 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
 namespace DmLab\AdminScim\Test\Unit\Model\Group;
 
 use DmLab\AdminScim\Model\Group\MemberResource;
+use DmLab\AdminScim\Model\User\ScimUserMapper;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Adapter\AdapterInterface;
 use Magento\Framework\DB\Select;
@@ -21,12 +23,19 @@ class MemberResourceTest extends TestCase
     /** @var MemberResource */
     private MemberResource $resource;
 
+    /** @var array<int,array{0:string,1:mixed}> captured Select::where() calls */
+    private array $wheres = [];
+
     protected function setUp(): void
     {
         $select = $this->createStub(Select::class);
-        foreach (['from', 'joinLeft', 'join', 'where', 'order'] as $method) {
+        foreach (['from', 'joinLeft', 'join', 'order'] as $method) {
             $select->method($method)->willReturnSelf();
         }
+        $select->method('where')->willReturnCallback(function ($cond, $value = null) use ($select): Select {
+            $this->wheres[] = [$cond, $value];
+            return $select;
+        });
 
         $this->connection = $this->createMock(AdapterInterface::class);
         $this->connection->method('select')->willReturn($select);
@@ -51,6 +60,15 @@ class MemberResourceTest extends TestCase
         ], $this->resource->getMembers(1));
     }
 
+    public function testGetMembersListsOnlyManagedAdmins(): void
+    {
+        $this->connection->expects(self::once())->method('fetchAll')->willReturn([]);
+
+        $this->resource->getMembers(1);
+
+        self::assertContains(['u.' . ScimUserMapper::MANAGED_FIELD . ' = ?', 1], $this->wheres);
+    }
+
     public function testGetUserIds(): void
     {
         $this->connection->expects(self::once())->method('fetchCol')->willReturn(['5', '7']);
@@ -71,6 +89,15 @@ class MemberResourceTest extends TestCase
         $this->connection->expects(self::once())->method('fetchCol')->willReturn(['5']);
 
         self::assertSame([7], $this->resource->findMissingUserIds([5, 7]));
+    }
+
+    public function testFindMissingUserIdsCountsUnmanagedAdminAsMissing(): void
+    {
+        // 5 is SCIM-managed; 7 is a local admin, so the managed-only query omits it.
+        $this->connection->expects(self::once())->method('fetchCol')->willReturn(['5']);
+
+        self::assertSame([7], $this->resource->findMissingUserIds([5, 7]));
+        self::assertContains([ScimUserMapper::MANAGED_FIELD . ' = ?', 1], $this->wheres);
     }
 
     public function testFindMissingUserIdsSkipsQueryForEmptyInput(): void

@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -74,5 +75,12 @@ class ConfigTest extends TestCase
         self::assertSame('2', $this->config([Config::XML_PATH_DEFAULT_ROLE => ' 2 '])->getDefaultRoleId());
         self::assertNull($this->config([])->getDefaultRoleId());
         self::assertNull($this->config([Config::XML_PATH_DEFAULT_ROLE => '   '])->getDefaultRoleId());
+    }
+
+    public function testGetProvider(): void
+    {
+        self::assertSame('azure', $this->config([Config::XML_PATH_PROVIDER => ' azure '])->getProvider());
+        self::assertNull($this->config([])->getProvider());
+        self::assertNull($this->config([Config::XML_PATH_PROVIDER => ''])->getProvider());
     }
 }

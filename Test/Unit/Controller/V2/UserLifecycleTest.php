@@ -1,13 +1,19 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
 namespace DmLab\AdminScim\Test\Unit\Controller\V2;
 
 use DmLab\AdminScim\Controller\V2\Users;
+use DmLab\AdminScim\Model\Audit\AuditLogger;
 use DmLab\AdminScim\Model\Auth\BearerTokenAuthenticator;
+use DmLab\AdminScim\Model\Config;
+use DmLab\AdminScim\Model\Group\GroupRoleSynchronizer;
+use DmLab\AdminScim\Model\Group\MemberResource;
+use DmLab\AdminScim\Model\Mapping\MappingEngine;
 use DmLab\AdminScim\Model\Normalization\RequestNormalizerChain;
 use DmLab\AdminScim\Model\Response\ListResponseBuilder;
 use DmLab\AdminScim\Model\User\FilterParser;
@@ -18,6 +24,8 @@ use DmLab\AdminScim\Model\User\UserProvisioner;
 use DmLab\AdminScim\Test\Unit\Doubles\AdminUserStore;
 use DmLab\AdminScim\Test\Unit\Doubles\InMemoryScimTrait;
 use DmLab\AdminScim\Test\Unit\Doubles\ScimResponseCapture;
+use Magento\Authorization\Model\Role;
+use Magento\Authorization\Model\RoleFactory;
 use Magento\Framework\Serialize\Serializer\Json;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -34,6 +42,8 @@ class UserLifecycleTest extends TestCase
     use InMemoryScimTrait;
 
     private const BASE = '/admin-scim/v2/Users';
+
+    private const DEFAULT_ROLE_ID = '3';
 
     /** @var AdminUserStore */
     private AdminUserStore $store;
@@ -66,7 +76,41 @@ class UserLifecycleTest extends TestCase
             $this->store->collectionFactory,
             $this->store->random,
             $this->repository,
-            $patcher
+            $patcher,
+            $this->makeSynchronizer(),
+            $this->createStub(AuditLogger::class),
+            $this->createWriteLock()
+        );
+    }
+
+    /**
+     * A real synchronizer with `default_role` set and no group pushes (Google-style IdP).
+     */
+    private function makeSynchronizer(): GroupRoleSynchronizer
+    {
+        $config = $this->createStub(Config::class);
+        $config->method('getGroupRoleMap')->willReturn(['Admins' => '5']);
+        $config->method('getDefaultRoleId')->willReturn(self::DEFAULT_ROLE_ID);
+
+        $memberResource = $this->createStub(MemberResource::class);
+        $memberResource->method('getGroupDisplayNamesForUser')->willReturn([]);
+
+        $roleFactory = $this->createStub(RoleFactory::class);
+        $roleFactory->method('create')->willReturnCallback(function (): Role {
+            $role = $this->createStub(Role::class);
+            $role->method('load')->willReturnSelf();
+            $role->method('getId')->willReturn(self::DEFAULT_ROLE_ID);
+
+            return $role;
+        });
+
+        return new GroupRoleSynchronizer(
+            $config,
+            new MappingEngine(),
+            $memberResource,
+            $this->store->userFactory,
+            $this->store->userResource,
+            $roleFactory
         );
     }
 
@@ -137,6 +181,40 @@ class UserLifecycleTest extends TestCase
         self::assertCount(1, $this->store->rows);
     }
 
+    public function testCreateWithoutGroupPushAssignsDefaultRole(): void
+    {
+        [$status, $created] = $this->dispatch('POST', self::BASE, json_encode([
+            'schemas' => [ScimUserMapper::SCHEMA_USER],
+            'userName' => 'jane@example.com',
+        ]));
+
+        self::assertSame(201, $status);
+        self::assertSame((int)self::DEFAULT_ROLE_ID, (int)$this->store->rows[(int)$created['id']]['role_id']);
+    }
+
+    public function testDeleteThenRecreateSameUserName(): void
+    {
+        $body = json_encode([
+            'schemas' => [ScimUserMapper::SCHEMA_USER],
+            'userName' => 'jane@example.com',
+            'externalId' => 'okta-1',
+        ]);
+        [, $created] = $this->dispatch('POST', self::BASE, $body);
+        $id = $created['id'];
+
+        [$status, $document] = $this->dispatch('DELETE', self::BASE . '/' . $id);
+        self::assertSame(204, $status);
+        self::assertSame([], $document);
+        self::assertArrayNotHasKey((int)$id, $this->store->rows);
+
+        [$status] = $this->dispatch('GET', self::BASE . '/' . $id);
+        self::assertSame(404, $status);
+
+        [$status] = $this->dispatch('POST', self::BASE, $body);
+        self::assertSame(201, $status);
+        self::assertCount(1, $this->store->rows);
+    }
+
     public function testDuplicateUserNameIsRejectedWithConflict(): void
     {
         $body = json_encode(['userName' => 'dup@example.com']);
@@ -146,6 +224,90 @@ class UserLifecycleTest extends TestCase
         [$status, $error] = $this->dispatch('POST', self::BASE, $body);
         self::assertSame(409, $status);
         self::assertSame('uniqueness', $error['scimType']);
+    }
+
+    public function testLocalAdminIsInvisibleAndImmutable(): void
+    {
+        $local = $this->seedLocalAdmin();
+
+        [$status] = $this->dispatch('GET', self::BASE . '/7');
+        self::assertSame(404, $status);
+
+        [, $list] = $this->dispatch('GET', self::BASE);
+        self::assertSame(0, $list['totalResults']);
+        [, $filtered] = $this->dispatch('GET', self::BASE, '', ['filter' => 'userName eq "local.admin"']);
+        self::assertSame(0, $filtered['totalResults']);
+
+        [$status] = $this->dispatch('PUT', self::BASE . '/7', json_encode(['userName' => 'hijack@example.com']));
+        self::assertSame(404, $status);
+
+        [$status] = $this->dispatch('PATCH', self::BASE . '/7', json_encode([
+            'schemas' => ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
+            'Operations' => [['op' => 'replace', 'path' => 'active', 'value' => false]],
+        ]));
+        self::assertSame(404, $status);
+
+        [$status] = $this->dispatch('DELETE', self::BASE . '/7');
+        self::assertSame(404, $status);
+
+        self::assertSame($local, $this->store->rows[7]);
+    }
+
+    public function testCreateCollidingWithLocalAdminIsConflictWithoutAdoption(): void
+    {
+        $local = $this->seedLocalAdmin();
+
+        [$status, $error] = $this->dispatch('POST', self::BASE, json_encode([
+            'userName' => 'local.admin',
+            'emails' => [['value' => 'other@example.com', 'primary' => true]],
+        ]));
+
+        self::assertSame(409, $status);
+        self::assertSame('uniqueness', $error['scimType']);
+        self::assertSame($local, $this->store->rows[7]);
+        self::assertCount(1, $this->store->rows);
+    }
+
+    public function testCreateFlagsManagedAndRemovingExternalIdKeepsIt(): void
+    {
+        [, $created] = $this->dispatch('POST', self::BASE, json_encode([
+            'userName' => 'jane@example.com',
+            'externalId' => 'okta-1',
+        ]));
+        $id = (int)$created['id'];
+        self::assertSame(1, $this->store->rows[$id][ScimUserMapper::MANAGED_FIELD]);
+
+        [$status] = $this->dispatch('PATCH', self::BASE . '/' . $id, json_encode([
+            'schemas' => ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
+            'Operations' => [['op' => 'remove', 'path' => 'externalId']],
+        ]));
+        self::assertSame(200, $status);
+        self::assertNull($this->store->rows[$id][ScimUserMapper::EXTERNAL_ID_FIELD]);
+        self::assertSame(1, $this->store->rows[$id][ScimUserMapper::MANAGED_FIELD]);
+
+        [$status] = $this->dispatch('GET', self::BASE . '/' . $id);
+        self::assertSame(200, $status);
+    }
+
+    /**
+     * Seed a locally created (non-SCIM) admin with id 7.
+     *
+     * @return array<string,mixed> the seeded row
+     */
+    private function seedLocalAdmin(): array
+    {
+        $this->store->autoId = 7;
+        $this->store->rows[7] = [
+            'user_id' => 7,
+            'username' => 'local.admin',
+            'email' => 'local@example.com',
+            'firstname' => 'Local',
+            'lastname' => 'Admin',
+            'is_active' => 1,
+            ScimUserMapper::MANAGED_FIELD => 0,
+        ];
+
+        return $this->store->rows[7];
     }
 
     /**
@@ -173,7 +335,7 @@ class UserLifecycleTest extends TestCase
             $this->mapper,
             new ListResponseBuilder(),
             new Json(),
-            new RequestNormalizerChain()
+            new RequestNormalizerChain($this->createStub(Config::class))
         );
         $controller->execute();
 

@@ -1,6 +1,7 @@
 <?php
 /**
  * Copyright © DMLab. All rights reserved.
+ * Licensed under the Open Software License version 3.0 (OSL-3.0). See LICENSE.
  */
 declare(strict_types=1);
 
@@ -8,8 +9,10 @@ namespace DmLab\AdminScim\Model\Group;
 
 use DmLab\AdminScim\Model\Config;
 use DmLab\AdminScim\Model\Mapping\MappingEngine;
+use DmLab\AdminScim\Model\User\ScimUserMapper;
 use Magento\Authorization\Model\RoleFactory;
 use Magento\User\Model\ResourceModel\User as UserResource;
+use Magento\User\Model\User;
 use Magento\User\Model\UserFactory;
 
 /**
@@ -20,7 +23,10 @@ use Magento\User\Model\UserFactory;
  * display names against the configured `displayName => role_id` rules (falling back
  * to the default role), and the first resolved role wins — a Magento admin holds a
  * single role. When nothing resolves the current role is stripped (deny), so
- * removing a user from its last mapped group revokes admin access.
+ * removing a user from its last mapped group revokes admin access. Admins not
+ * SCIM-managed are never touched, even if a stale membership row names them.
+ * Every role change, including a strip, is returned for the caller to audit-log
+ * once its transaction commits, so a rolled-back change is never recorded.
  *
  * Mirrors admin-sso's login-time RoleAssigner, but the group source is SCIM
  * membership rather than an SSO identity — SCIM provisions the role in the
@@ -50,15 +56,22 @@ class GroupRoleSynchronizer
      * Re-derive and apply the ACL role for each of the given admin users.
      *
      * @param int[] $userIds admin_user.user_id values whose membership changed
+     * @return array<int,array<string,mixed>> `role.change` audit contexts of the applied changes
      */
-    public function syncUsers(array $userIds): void
+    public function syncUsers(array $userIds): array
     {
         $rules = $this->config->getGroupRoleMap();
         $default = $this->config->getDefaultRoleId();
 
+        $changes = [];
         foreach ($this->uniqueIds($userIds) as $userId) {
-            $this->syncUser($userId, $rules, $default);
+            $change = $this->syncUser($userId, $rules, $default);
+            if ($change !== null) {
+                $changes[] = $change;
+            }
         }
+
+        return $changes;
     }
 
     /**
@@ -67,14 +80,18 @@ class GroupRoleSynchronizer
      * @param int $userId
      * @param array<string,string> $rules displayName => role_id
      * @param string|null $default fallback role id
+     * @return array<string,mixed>|null the role change, or null when none was applied
      */
-    private function syncUser(int $userId, array $rules, ?string $default): void
+    private function syncUser(int $userId, array $rules, ?string $default): ?array
     {
         $user = $this->userFactory->create();
         $this->userResource->load($user, $userId);
         if (!$user->getId()) {
             // The admin was removed between the membership change and this sync.
-            return;
+            return null;
+        }
+        if ((int)$user->getData(ScimUserMapper::MANAGED_FIELD) !== 1) {
+            return null;
         }
 
         $displayNames = $this->memberResource->getGroupDisplayNamesForUser($userId);
@@ -84,7 +101,7 @@ class GroupRoleSynchronizer
 
         if ($roleId !== null && $currentRoleId === $roleId) {
             // Already on the resolved role — nothing to do.
-            return;
+            return null;
         }
 
         // Fail closed: deny (strip the current role) when nothing resolves, or when
@@ -93,15 +110,35 @@ class GroupRoleSynchronizer
         // silently preserve the user's prior — possibly higher — role. A user that
         // already holds no role is left alone.
         if ($roleId === null || !$this->roleExists($roleId)) {
-            if ($currentRoleId !== '') {
-                $user->setData('role_id', 0);
-                $this->userResource->save($user);
+            if ($currentRoleId === '') {
+                return null;
             }
-            return;
+            $user->setData('role_id', 0);
+            $this->userResource->save($user);
+            return $this->roleChange($user, $currentRoleId, null);
         }
 
         $user->setData('role_id', (int)$roleId);
         $this->userResource->save($user);
+        return $this->roleChange($user, $currentRoleId, $roleId);
+    }
+
+    /**
+     * Audit context of a role change; a null/empty role id means "no role".
+     *
+     * @param User $user
+     * @param string $from
+     * @param string|null $to
+     * @return array<string,mixed>
+     */
+    private function roleChange(User $user, string $from, ?string $to): array
+    {
+        return [
+            'user_id' => (int)$user->getId(),
+            'userName' => (string)$user->getData('username'),
+            'from' => $from === '' ? null : (int)$from,
+            'to' => $to === null ? null : (int)$to,
+        ];
     }
 
     /**

@@ -2,7 +2,8 @@
 
 > SCIM 2.0 provisioning server for Magento 2 admin users.
 
-![License](https://img.shields.io/badge/license-OSL--3.0-green) ![Magento](https://img.shields.io/badge/Magento-2.4-orange) ![PHP](https://img.shields.io/badge/PHP-8.3--8.5-blue) ![Version](https://img.shields.io/badge/version-0.0.1-lightgrey)
+[![CI](https://github.com/dmlab-work/module-admin-scim/actions/workflows/ci.yml/badge.svg)](https://github.com/dmlab-work/module-admin-scim/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/dmlab-work/module-admin-scim/graph/badge.svg)](https://codecov.io/gh/dmlab-work/module-admin-scim) [![Packagist](https://img.shields.io/packagist/dt/dmlab/module-admin-scim)](https://packagist.org/packages/dmlab/module-admin-scim)
+![License](https://img.shields.io/badge/license-OSL--3.0-green) ![Magento](https://img.shields.io/badge/Magento-2.4-orange) ![PHP](https://img.shields.io/badge/PHP-8.3--8.5-blue) ![Version](https://img.shields.io/badge/version-0.2.0-lightgrey)
 
 `DmLab_AdminScim` turns Magento into a SCIM 2.0 (RFC 7643/7644) provisioning
 server, so an identity provider such as Okta or Entra can create, update, and
@@ -12,6 +13,17 @@ background provisioning and, crucially, **deprovisioning**.
 
 Scope is admin users only (Users plus Groups → ACL roles). B2C/B2B customer
 provisioning is out of scope.
+
+## Scope
+
+SCIM operates only on admins it created (`admin_user.dmlab_scim_managed = 1`;
+admins with an `externalId` or a SCIM group membership from earlier releases are
+flagged on upgrade — check that no local admin got flagged that way).
+
+- Local admins are never visible to GET/list, never changed by PUT/PATCH/DELETE,
+  never accepted as group members and never touched by group→role sync.
+- Creating a user whose `userName` belongs to a local admin returns `409` — no
+  adoption.
 
 ## Endpoints
 
@@ -31,11 +43,14 @@ https://<your-store>/admin-scim/v2
 | GET | `/Users/{id}` · `/Users?filter=…` | Read one · list with filter + pagination |
 | PUT | `/Users/{id}` | Replace the whole resource |
 | PATCH | `/Users/{id}` | Add/replace/remove attrs; `active=false` deprovisions |
+| DELETE | `/Users/{id}` | Hard delete (`204`) |
 | POST | `/Groups` | Create a group |
 | GET | `/Groups/{id}` · `/Groups?filter=…` | Read one · list with filter + pagination |
+| PUT | `/Groups/{id}` | Replace name, externalId and members |
 | PATCH | `/Groups/{id}` | Attribute + member add/replace/remove |
+| DELETE | `/Groups/{id}` | Delete (`204`); former members' roles re-derived |
 
-Unsupported verbs answer `501 Not Implemented`. Errors use the RFC 7644 error
+Other verbs (e.g. `HEAD`) answer `501 Not Implemented`. Errors use the RFC 7644 error
 schema (`urn:ietf:params:scim:api:messages:2.0:Error`) with the correct status.
 
 ## Setup
@@ -44,14 +59,18 @@ schema (`urn:ietf:params:scim:api:messages:2.0:Error`) with the correct status.
    `bin/magento setup:upgrade`.
 2. In the admin panel go to **Stores → Configuration → DMLab → Admin SCIM**.
 3. **Enable Admin SCIM** = *Yes*. The endpoint is disabled by default.
-4. **Bearer Token** — set a long random value. It is stored encrypted and is the
+4. **Provider** — the IdP whose request quirks are normalized. Under *None* a
+   single installed provider plugin still applies; with several, none runs until
+   one is picked.
+5. **Bearer Token** — set a long random value. It is stored encrypted and is the
    credential the IdP presents. Point your IdP's SCIM app at the base URL above and
    configure it to send `Authorization: Bearer <token>`.
-5. **Group → Role Map** — one `displayName=role_id` per line, mapping a SCIM group
+6. **Group → Role Map** — one `displayName=role_id` per line, mapping a SCIM group
    to a Magento admin role id (`#` lines ignored). A provisioned member gets the
    first matching role (admins hold a single role).
-6. **Default Role Id** — role assigned when a member's groups match no rule. Leave
-   empty to deny (no role) unmapped members.
+7. **Default Role Id** — role assigned when an admin's groups match no rule,
+   including admins created with no groups (applied at user create/update). Leave
+   empty to deny (no role).
 
 ## Supported features
 
@@ -70,19 +89,20 @@ Advertised honestly in `ServiceProviderConfig`:
 
 ## Provider quirks
 
-The core is strict-RFC. IdP SCIM clients deviate — Entra especially (flat complex
-attrs in PATCH, `value` in group-member remove, ADD/REPLACE inconsistency). Those
-quirks are **not** in the core; a per-IdP plugin (`admin-scim-okta`,
-`admin-scim-azure`) absorbs them via a normalization seam:
+The core accepts common IdP PATCH forms: URN-prefixed paths,
+`emails[type eq "work"].value` / `emails[primary eq true].value`, stringified
+booleans. Attributes `admin_user` can't store (e.g. `title`, `phoneNumbers`, the
+enterprise extension) are ignored, not rejected; removing `userName`, `name.*`,
+`emails` or `active` is `400 mutability`. IdP-specific shapes (e.g. Entra's flat
+complex attrs) are absorbed by a per-IdP plugin via a normalization seam:
 
 - The plugin implements `DmLab\AdminScim\Api\RequestNormalizerInterface` —
   a pure, total `normalize(resourceType, operation, payload)` that rewrites the
-  decoded body toward RFC shape and returns unchanged payloads it does not own.
-- It `di`-merges the normalizer into `RequestNormalizerChain` (see `etc/di.xml`),
-  which runs before every create/replace/patch. With no plugin installed the chain
-  is empty and bodies pass through untouched.
-
-Running against a real IdP therefore needs the matching provider plugin.
+  decoded body toward RFC shape and returns it unchanged when nothing needs rewriting.
+- It `di`-merges the normalizer into `RequestNormalizerChain` (see `etc/di.xml`)
+  under its provider code (`okta`, `azure`, …). Before every create/replace/patch
+  the chain runs **only the active provider's** normalizer (the **Provider** config
+  field). With no plugin installed bodies pass through untouched.
 
 ## Security notes
 
@@ -97,6 +117,15 @@ Running against a real IdP therefore needs the matching provider plugin.
 - Serve over TLS only — the token travels in the `Authorization` header.
 - `active=false` deprovisions an admin account, so treat the token with the same
   care as an admin password.
+- The token is marked sensitive, so `app:config:dump` never writes it to
+  `app/etc/config.php`.
+- Failed-auth throttling: 10 failures per client IP, each within 15 min of the last → `429` with
+  `Retry-After`. The client IP is `REMOTE_ADDR`; `X-Forwarded-For` is ignored. Behind a
+  reverse proxy, list its IPs in the `trustedProxies` argument of
+  `DmLab\AdminScim\Model\Auth\ClientIp` in `di.xml`, otherwise every client shares the
+  proxy IP.
+- Audit log: SCIM writes, role changes and auth failures (with client IP; never the
+  token, headers or body) go to `var/log/dmlab_admin_scim_audit.log`.
 
 ## Requirements
 
