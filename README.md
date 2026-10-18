@@ -2,8 +2,7 @@
 
 > SCIM 2.0 provisioning server for Magento 2 admin users.
 
-[![CI](https://github.com/dmlab-work/module-admin-scim/actions/workflows/ci.yml/badge.svg)](https://github.com/dmlab-work/module-admin-scim/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/dmlab-work/module-admin-scim/graph/badge.svg)](https://codecov.io/gh/dmlab-work/module-admin-scim) [![Packagist](https://img.shields.io/packagist/dt/dmlab/module-admin-scim)](https://packagist.org/packages/dmlab/module-admin-scim)
-![License](https://img.shields.io/badge/license-OSL--3.0-green) ![Magento](https://img.shields.io/badge/Magento-2.4-orange) ![PHP](https://img.shields.io/badge/PHP-8.3--8.5-blue) ![Version](https://img.shields.io/badge/version-0.2.0-lightgrey)
+[![CI](https://github.com/dmlab-work/module-admin-scim/actions/workflows/ci.yml/badge.svg)](https://github.com/dmlab-work/module-admin-scim/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/dmlab-work/module-admin-scim/graph/badge.svg)](https://codecov.io/gh/dmlab-work/module-admin-scim) [![Packagist Version](https://img.shields.io/packagist/v/dmlab/module-admin-scim)](https://packagist.org/packages/dmlab/module-admin-scim) [![Downloads](https://img.shields.io/packagist/dt/dmlab/module-admin-scim)](https://packagist.org/packages/dmlab/module-admin-scim) [![PHP](https://img.shields.io/packagist/dependency-v/dmlab/module-admin-scim/php)](https://packagist.org/packages/dmlab/module-admin-scim) [![License](https://img.shields.io/packagist/l/dmlab/module-admin-scim)](LICENSE) ![Magento](https://img.shields.io/badge/Magento-2.4-orange)
 
 `DmLab_AdminScim` turns Magento into a SCIM 2.0 (RFC 7643/7644) provisioning
 server, so an identity provider such as Okta or Entra can create, update, and
