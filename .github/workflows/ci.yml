@@ -59,8 +59,8 @@ jobs:
       - name: Configure Magento packages
         run: |
           composer config repositories.mage-os composer https://mirror.mage-os.org/
-          composer config --no-plugins allow-plugins.magento/magento-composer-installer true
-          composer config --no-plugins allow-plugins.magento/composer-dependency-version-audit-plugin true
+          composer config --no-plugins allow-plugins.magento/magento-composer-installer false
+          composer config --no-plugins allow-plugins.magento/composer-dependency-version-audit-plugin false
 
       - uses: ramsey/composer-install@v3
 
