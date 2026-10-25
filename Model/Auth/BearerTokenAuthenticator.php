@@ -53,36 +53,41 @@ class BearerTokenAuthenticator
             throw $e;
         }
 
+        $provided = $this->extractBearerToken($request);
+        $presented = $provided !== null;
+
         if (!$this->config->isEnabled()) {
-            throw $this->fail('disabled');
+            throw $this->fail('disabled', $presented);
         }
 
         $configured = $this->config->getBearerToken();
         if ($configured === null || $configured === '') {
-            throw $this->fail('no_token_configured');
+            throw $this->fail('no_token_configured', $presented);
         }
 
-        $provided = $this->extractBearerToken($request);
         if ($provided === null) {
-            throw $this->fail('missing_bearer');
+            throw $this->fail('missing_bearer', false);
         }
 
         if (!hash_equals($configured, $provided)) {
-            throw $this->fail('token_mismatch');
+            throw $this->fail('token_mismatch', true);
         }
     }
 
     /**
      * Record and audit the failure, then build the generic 401.
      *
+     * The challenge depends only on what the client sent, so it never reveals server state.
+     *
      * @param string $reason audit-only; never sent to the client
+     * @param bool $tokenPresented whether the request carried a bearer token
      */
-    private function fail(string $reason): ScimException
+    private function fail(string $reason, bool $tokenPresented): ScimException
     {
         $this->throttle->registerFailure();
         $this->auditLogger->log('auth.failure', ['reason' => $reason]);
 
-        return ScimException::unauthorized('Authentication failed.');
+        return ScimException::unauthorized('Authentication failed.', $tokenPresented);
     }
 
     /**

@@ -46,4 +46,15 @@ class DiConfigTest extends TestCase
         );
         self::assertSame('/var/log/dmlab_admin_scim_audit.log', trim($fileName->item(0)->textContent));
     }
+
+    public function testAuditLoggerDoesNotInheritGlobalHandlers(): void
+    {
+        $dom = new \DOMDocument();
+        self::assertTrue($dom->load(dirname(__DIR__, 2) . '/etc/di.xml'));
+
+        $type = (new \DOMXPath($dom))->query('/config/virtualType[@name="DmLab\AdminScim\Logger\Audit"]/@type');
+
+        // Framework\Logger\Monolog carries app/etc/di.xml's system/debug/syslog handlers.
+        self::assertSame('Monolog\Logger', $type->item(0)->nodeValue);
+    }
 }

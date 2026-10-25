@@ -21,13 +21,15 @@ class ScimException extends \RuntimeException
      * @param string|null $scimType RFC 7644 detail error keyword (e.g. `invalidValue`, `uniqueness`).
      * @param \Throwable|null $previous
      * @param int|null $retryAfter Seconds for the `Retry-After` header, or null for none.
+     * @param string|null $authChallenge `WWW-Authenticate` header value, or null for none.
      */
     public function __construct(
         private readonly int $httpStatus,
         string $detail,
         private readonly ?string $scimType = null,
         ?\Throwable $previous = null,
-        private readonly ?int $retryAfter = null
+        private readonly ?int $retryAfter = null,
+        private readonly ?string $authChallenge = null
     ) {
         parent::__construct($detail, 0, $previous);
     }
@@ -56,6 +58,14 @@ class ScimException extends \RuntimeException
         return $this->retryAfter;
     }
 
+    /**
+     * The `WWW-Authenticate` challenge (RFC 6750 §3), or null when not applicable.
+     */
+    public function getAuthChallenge(): ?string
+    {
+        return $this->authChallenge;
+    }
+
     // Named constructors keep call sites readable; static is intentional (these
     // never need interception), so the StaticFunction advisory does not apply.
     // phpcs:disable Magento2.Functions.StaticFunction.StaticFunction
@@ -72,13 +82,16 @@ class ScimException extends \RuntimeException
     }
 
     /**
-     * 401 Unauthorized — missing or invalid bearer credential.
+     * 401 Unauthorized — missing or invalid bearer credential, with a Bearer challenge.
      *
      * @param string $detail
+     * @param bool $invalidToken true when a token was presented (RFC 6750 `invalid_token`)
      */
-    public static function unauthorized(string $detail = 'Authentication failed.'): self
+    public static function unauthorized(string $detail = 'Authentication failed.', bool $invalidToken = false): self
     {
-        return new self(401, $detail);
+        $challenge = 'Bearer realm="SCIM"' . ($invalidToken ? ', error="invalid_token"' : '');
+
+        return new self(401, $detail, null, null, null, $challenge);
     }
 
     /**

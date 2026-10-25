@@ -112,6 +112,12 @@ return [
             [42],
             'Ops',
         ],
+        'entra: empty member remove as no-op add' => [
+            [42],
+            [['op' => 'add', 'path' => 'members', 'value' => []]],
+            [42],
+            'G',
+        ],
         'okta: path-less rename with id' => [
             [42],
             [['op' => 'replace', 'value' => ['id' => '5', 'displayName' => 'Ops']]],

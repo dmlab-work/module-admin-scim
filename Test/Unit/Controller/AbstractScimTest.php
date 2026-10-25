@@ -11,6 +11,15 @@ use DmLab\AdminScim\Controller\AbstractScim;
 use DmLab\AdminScim\Exception\ScimException;
 use DmLab\AdminScim\Model\Auth\BearerTokenAuthenticator;
 use DmLab\AdminScim\Model\Response\ScimResponse;
+use Magento\Framework\App\Action\HttpConnectActionInterface;
+use Magento\Framework\App\Action\HttpDeleteActionInterface;
+use Magento\Framework\App\Action\HttpGetActionInterface;
+use Magento\Framework\App\Action\HttpOptionsActionInterface;
+use Magento\Framework\App\Action\HttpPatchActionInterface;
+use Magento\Framework\App\Action\HttpPostActionInterface;
+use Magento\Framework\App\Action\HttpPropfindActionInterface;
+use Magento\Framework\App\Action\HttpPutActionInterface;
+use Magento\Framework\App\Action\HttpTraceActionInterface;
 use Magento\Framework\App\Request\Http;
 use Magento\Framework\Controller\Result\Raw;
 use Magento\Framework\Controller\ResultInterface;
@@ -115,6 +124,29 @@ class AbstractScimTest extends TestCase
 
         self::assertTrue($controller->validateForCsrf($this->request));
         self::assertNull($controller->createCsrfValidationException($this->request));
+    }
+
+    public function testAcceptsEveryVerbMagentoRoutes(): void
+    {
+        // Magento answers an HTML 404 for a verb whose interface the action lacks; handle() must see it.
+        $this->authenticator->expects(self::never())->method('authenticate');
+        $this->response->expects(self::never())->method('error');
+        $this->logger->expects(self::never())->method('critical');
+        $controller = $this->controller(static fn (): ResultInterface => throw new \LogicException('unused'));
+
+        foreach ([
+            HttpGetActionInterface::class,
+            HttpPostActionInterface::class,
+            HttpPutActionInterface::class,
+            HttpPatchActionInterface::class,
+            HttpDeleteActionInterface::class,
+            HttpOptionsActionInterface::class,
+            HttpConnectActionInterface::class,
+            HttpPropfindActionInterface::class,
+            HttpTraceActionInterface::class,
+        ] as $interface) {
+            self::assertInstanceOf($interface, $controller);
+        }
     }
 
     public function testUnexpectedThrowableIsLoggedAndReturns500(): void

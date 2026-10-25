@@ -34,6 +34,7 @@ class ServiceProviderConfigTest extends TestCase
     protected function setUp(): void
     {
         $request = $this->createStub(Http::class);
+        $request->method('getMethod')->willReturn('GET');
         $logger = $this->createMock(LoggerInterface::class);
         $logger->expects(self::never())->method('critical');
 

@@ -44,6 +44,16 @@ class ScimExceptionTest extends TestCase
         self::assertNull(ScimException::unauthorized()->getRetryAfter());
     }
 
+    public function testUnauthorizedCarriesBearerChallenge(): void
+    {
+        self::assertSame('Bearer realm="SCIM"', ScimException::unauthorized()->getAuthChallenge());
+        self::assertSame(
+            'Bearer realm="SCIM", error="invalid_token"',
+            ScimException::unauthorized('x', true)->getAuthChallenge()
+        );
+        self::assertNull(ScimException::notFound()->getAuthChallenge());
+    }
+
     public function testPreservesPreviousThrowable(): void
     {
         $previous = new \RuntimeException('root cause');

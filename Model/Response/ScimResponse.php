@@ -81,6 +81,9 @@ class ScimResponse
         if ($exception->getRetryAfter() !== null) {
             $result->setHeader('Retry-After', (string)$exception->getRetryAfter(), true);
         }
+        if ($exception->getAuthChallenge() !== null) {
+            $result->setHeader('WWW-Authenticate', $exception->getAuthChallenge(), true);
+        }
 
         return $result;
     }

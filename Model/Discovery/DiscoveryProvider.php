@@ -72,12 +72,18 @@ class DiscoveryProvider
      */
     public function resourceTypes(): array
     {
-        $resources = [
-            $this->resourceType('User', '/Users', 'User Account', self::SCHEMA_USER),
-            $this->resourceType('Group', '/Groups', 'Group', self::SCHEMA_GROUP),
-        ];
+        return $this->listResponse($this->resourceTypeResources());
+    }
 
-        return $this->listResponse($resources);
+    /**
+     * One ResourceType by id (`User`, `Group`; case-insensitive), or null when unknown.
+     *
+     * @param string $id
+     * @return array<string,mixed>|null
+     */
+    public function resourceType(string $id): ?array
+    {
+        return $this->findById($this->resourceTypeResources(), $id);
     }
 
     /**
@@ -87,12 +93,62 @@ class DiscoveryProvider
      */
     public function schemas(): array
     {
-        $resources = [
+        return $this->listResponse($this->schemaResources());
+    }
+
+    /**
+     * One Schema by its URN id (case-insensitive), or null when unknown.
+     *
+     * @param string $id
+     * @return array<string,mixed>|null
+     */
+    public function schema(string $id): ?array
+    {
+        return $this->findById($this->schemaResources(), $id);
+    }
+
+    /**
+     * The ResourceType resources (User, Group).
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    private function resourceTypeResources(): array
+    {
+        return [
+            $this->buildResourceType('User', '/Users', 'User Account', self::SCHEMA_USER),
+            $this->buildResourceType('Group', '/Groups', 'Group', self::SCHEMA_GROUP),
+        ];
+    }
+
+    /**
+     * The Schema resources (User, Group).
+     *
+     * @return array<int,array<string,mixed>>
+     */
+    private function schemaResources(): array
+    {
+        return [
             $this->userSchema(),
             $this->groupSchema(),
         ];
+    }
 
-        return $this->listResponse($resources);
+    /**
+     * The resource whose `id` matches case-insensitively, or null.
+     *
+     * @param array<int,array<string,mixed>> $resources
+     * @param string $id
+     * @return array<string,mixed>|null
+     */
+    private function findById(array $resources, string $id): ?array
+    {
+        foreach ($resources as $resource) {
+            if (strcasecmp($resource['id'], $id) === 0) {
+                return $resource;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -121,7 +177,7 @@ class DiscoveryProvider
      * @param string $schema
      * @return array<string,mixed>
      */
-    private function resourceType(string $id, string $endpoint, string $description, string $schema): array
+    private function buildResourceType(string $id, string $endpoint, string $description, string $schema): array
     {
         return [
             'schemas' => [self::SCHEMA_RESOURCE_TYPE],

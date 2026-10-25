@@ -36,8 +36,8 @@ https://<your-store>/admin-scim/v2
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/ServiceProviderConfig` | Advertised capabilities |
-| GET | `/ResourceTypes` | User + Group resource types |
-| GET | `/Schemas` | User + Group schema definitions |
+| GET | `/ResourceTypes` · `/ResourceTypes/{id}` | All resource types · one (`404` if unknown) |
+| GET | `/Schemas` · `/Schemas/{id}` | All schema definitions · one by URN (`404` if unknown) |
 | POST | `/Users` | Create an admin user |
 | GET | `/Users/{id}` · `/Users?filter=…` | Read one · list with filter + pagination |
 | PUT | `/Users/{id}` | Replace the whole resource |
@@ -49,7 +49,7 @@ https://<your-store>/admin-scim/v2
 | PATCH | `/Groups/{id}` | Attribute + member add/replace/remove |
 | DELETE | `/Groups/{id}` | Delete (`204`); former members' roles re-derived |
 
-Other verbs (e.g. `HEAD`) answer `501 Not Implemented`. Errors use the RFC 7644 error
+Other verbs (e.g. `HEAD`, `OPTIONS`) answer `501 Not Implemented`; `401` carries `WWW-Authenticate: Bearer`. Errors use the RFC 7644 error
 schema (`urn:ietf:params:scim:api:messages:2.0:Error`) with the correct status.
 
 ## Setup

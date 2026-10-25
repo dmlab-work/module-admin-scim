@@ -8,6 +8,7 @@ declare(strict_types=1);
 namespace DmLab\AdminScim\Controller\V2;
 
 use DmLab\AdminScim\Controller\AbstractScim;
+use DmLab\AdminScim\Exception\ScimException;
 use DmLab\AdminScim\Model\Auth\BearerTokenAuthenticator;
 use DmLab\AdminScim\Model\Discovery\DiscoveryProvider;
 use DmLab\AdminScim\Model\Response\ScimResponse;
@@ -16,8 +17,9 @@ use Magento\Framework\Controller\ResultInterface;
 use Psr\Log\LoggerInterface;
 
 /**
- * `GET /admin-scim/v2/ResourceTypes` — lists the resource types the server
- * exposes (User, Group) so a client can discover their endpoints and schemas.
+ * `GET /admin-scim/v2/ResourceTypes[/{id}]` — lists the resource types the server
+ * exposes (User, Group) so a client can discover their endpoints and schemas, or
+ * returns one by id (RFC 7644 §4).
  */
 class ResourceTypes extends AbstractScim
 {
@@ -43,6 +45,17 @@ class ResourceTypes extends AbstractScim
      */
     protected function handle(): ResultInterface
     {
-        return $this->response->json($this->discovery->resourceTypes());
+        $this->assertGet();
+        $id = $this->pathSegmentAfter('ResourceTypes');
+        if ($id === null) {
+            return $this->response->json($this->discovery->resourceTypes());
+        }
+
+        $resource = $this->discovery->resourceType($id);
+        if ($resource === null) {
+            throw ScimException::notFound(sprintf('Resource type "%s" not found.', $id));
+        }
+
+        return $this->response->json($resource);
     }
 }

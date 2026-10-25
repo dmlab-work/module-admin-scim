@@ -89,38 +89,44 @@ class BearerTokenAuthenticatorTest extends TestCase
 
     public function testMissingHeaderIsUnauthorized(): void
     {
-        $this->assertUnauthorized('secret-token', false);
+        $this->assertUnauthorized('secret-token', false, true, false);
     }
 
     public function testMalformedHeaderIsUnauthorized(): void
     {
-        $this->assertUnauthorized('secret-token', 'Basic dXNlcjpwYXNz');
+        $this->assertUnauthorized('secret-token', 'Basic dXNlcjpwYXNz', true, false);
     }
 
     public function testEmptyBearerTokenIsUnauthorized(): void
     {
-        $this->assertUnauthorized('secret-token', 'Bearer   ');
+        $this->assertUnauthorized('secret-token', 'Bearer   ', true, false);
     }
 
     public function testWrongTokenIsUnauthorized(): void
     {
-        $this->assertUnauthorized('secret-token', 'Bearer wrong-token');
+        $this->assertUnauthorized('secret-token', 'Bearer wrong-token', true, true);
     }
 
     public function testUnconfiguredTokenIsUnauthorized(): void
     {
-        $this->assertUnauthorized(null, 'Bearer anything');
+        $this->assertUnauthorized(null, 'Bearer anything', true, true);
     }
 
     public function testDisabledEndpointIsUnauthorizedEvenWithValidToken(): void
     {
-        $this->assertUnauthorized('secret-token', 'Bearer secret-token', false);
+        $this->assertUnauthorized('secret-token', 'Bearer secret-token', false, true);
+    }
+
+    public function testDisabledEndpointWithoutTokenGetsPlainChallenge(): void
+    {
+        $this->assertUnauthorized('secret-token', false, false, false);
     }
 
     private function assertUnauthorized(
         ?string $configuredToken,
         string|false $authHeader,
-        bool $enabled = true
+        bool $enabled,
+        bool $invalidToken
     ): void {
         $throttle = $this->createMock(FailedAuthThrottle::class);
         $throttle->expects(self::once())->method('assertNotBlocked');
@@ -147,6 +153,11 @@ class BearerTokenAuthenticatorTest extends TestCase
             self::fail('Expected ScimException was not thrown.');
         } catch (ScimException $e) {
             self::assertSame(401, $e->getHttpStatus());
+            // The challenge reflects only what the client sent, never server state.
+            self::assertSame(
+                $invalidToken ? 'Bearer realm="SCIM", error="invalid_token"' : 'Bearer realm="SCIM"',
+                $e->getAuthChallenge()
+            );
         }
     }
 }

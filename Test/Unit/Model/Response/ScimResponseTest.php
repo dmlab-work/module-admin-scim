@@ -120,6 +120,24 @@ class ScimResponseTest extends TestCase
         self::assertArrayNotHasKey('scimType', $this->serialized);
     }
 
+    public function testUnauthorizedErrorSetsWwwAuthenticateHeader(): void
+    {
+        $headers = [];
+        $raw = $this->createStub(Raw::class);
+        $raw->method('setHttpResponseCode')->willReturnSelf();
+        $raw->method('setContents')->willReturnSelf();
+        $raw->method('setHeader')->willReturnCallback(
+            function (string $name, string $value, bool $replace) use (&$headers, $raw): Raw {
+                $headers[$name] = [$value, $replace];
+                return $raw;
+            }
+        );
+
+        $this->response($raw)->error(ScimException::unauthorized('Authentication failed.', true));
+
+        self::assertSame(['Bearer realm="SCIM", error="invalid_token"', true], $headers['WWW-Authenticate'] ?? null);
+    }
+
     public function testErrorOmitsRetryAfterByDefault(): void
     {
         $raw = $this->createMock(Raw::class);

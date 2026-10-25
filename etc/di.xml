@@ -25,7 +25,8 @@
             <argument name="fileName" xsi:type="string">/var/log/dmlab_admin_scim_audit.log</argument>
         </arguments>
     </virtualType>
-    <virtualType name="DmLab\AdminScim\Logger\Audit" type="Magento\Framework\Logger\Monolog">
+    <!-- Plain Monolog: a Framework\Logger\Monolog virtualType would merge in the global system/debug handlers. -->
+    <virtualType name="DmLab\AdminScim\Logger\Audit" type="Monolog\Logger">
         <arguments>
             <argument name="name" xsi:type="string">dmlab_admin_scim_audit</argument>
             <argument name="handlers" xsi:type="array">

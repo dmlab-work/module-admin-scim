@@ -150,6 +150,22 @@ class DiscoveryProviderTest extends TestCase
         self::assertContains('value', $this->subAttributeNames($attributes['members']));
     }
 
+    public function testResourceTypeLookupById(): void
+    {
+        $user = $this->provider->resourceType('User');
+        self::assertSame('User', $user['id']);
+        self::assertSame('/Users', $user['endpoint']);
+        self::assertSame('Group', $this->provider->resourceType('group')['id']);
+        self::assertNull($this->provider->resourceType('Device'));
+    }
+
+    public function testSchemaLookupByUrn(): void
+    {
+        self::assertSame(self::SCHEMA_USER, $this->provider->schema(self::SCHEMA_USER)['id']);
+        self::assertSame(self::SCHEMA_GROUP, $this->provider->schema(strtoupper(self::SCHEMA_GROUP))['id']);
+        self::assertNull($this->provider->schema('urn:ietf:params:scim:schemas:extension:enterprise:2.0:User'));
+    }
+
     /**
      * @return array<string,mixed>
      */

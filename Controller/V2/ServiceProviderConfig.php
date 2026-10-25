@@ -43,6 +43,8 @@ class ServiceProviderConfig extends AbstractScim
      */
     protected function handle(): ResultInterface
     {
+        $this->assertGet();
+
         return $this->response->json($this->discovery->serviceProviderConfig());
     }
 }
