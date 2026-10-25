@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.2.1
+
+- Fixed: audit log no longer duplicated into `system.log` / `debug.log`.
+- `GET /ResourceTypes/{id}` and `/Schemas/{id}` return the single resource (`404` if unknown).
+- `401` responses carry `WWW-Authenticate: Bearer`.
+- `OPTIONS` and other unsupported verbs answer SCIM `501`; discovery endpoints are GET-only.
+- Tested on Magento 2.4.9 and PHP 8.5.
+
 ## 0.2.0
 
 ### Breaking
