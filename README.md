@@ -128,7 +128,7 @@ complex attrs) are absorbed by a per-IdP plugin via a normalization seam:
 
 ## Requirements
 
-- Magento **2.4.x**
+- Magento **2.4.x** (tested on 2.4.9)
 - PHP **8.3 – 8.5**
 
 ## License
