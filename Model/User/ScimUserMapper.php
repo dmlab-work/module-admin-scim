@@ -30,14 +30,23 @@ class ScimUserMapper
     /** admin_user flag: 1 = created by SCIM. SCIM sees and touches only these rows. */
     public const MANAGED_FIELD = 'dmlab_scim_managed';
 
+    /** admin_user column holding the SCIM `userName` as sent (the login may be shortened). */
+    public const USER_NAME_FIELD = 'dmlab_scim_user_name';
+
     /** Lastname used when the payload carries no usable family name. */
     private const DEFAULT_LAST_NAME = 'SCIM';
 
     /** admin_user.firstname / lastname column length. */
     private const NAME_MAX_LENGTH = 32;
 
+    /** dmlab_scim_user_name column length. */
+    public const USER_NAME_MAX_LENGTH = 255;
+
     /** admin_user.username column length. */
-    private const USERNAME_MAX_LENGTH = 40;
+    private const LOGIN_MAX_LENGTH = 40;
+
+    /** Hex chars of the userName hash that keep a shortened login unique. */
+    private const LOGIN_HASH_LENGTH = 10;
 
     /** admin_user.email column length. */
     private const EMAIL_MAX_LENGTH = 128;
@@ -53,9 +62,8 @@ class ScimUserMapper
     /**
      * The required `userName`, trimmed.
      *
-     * A login cannot be silently truncated (unlike a display name), so a value
-     * exceeding the column length is rejected as 400 rather than surfacing as an
-     * opaque DB 500 — an IdP treats 500 as transient and retries a doomed create.
+     * A value exceeding the column length is rejected as 400 rather than surfacing
+     * as an opaque DB 500 — an IdP treats 500 as transient and retries a doomed create.
      *
      * @param array<string,mixed> $payload
      * @throws ScimException 400 `invalidValue` when absent, empty or too long.
@@ -68,14 +76,44 @@ class ScimUserMapper
         if ($userName === '') {
             throw ScimException::badRequest('Attribute "userName" is required.', 'invalidValue');
         }
-        if (mb_strlen($userName) > self::USERNAME_MAX_LENGTH) {
+        if (mb_strlen($userName) > self::USER_NAME_MAX_LENGTH) {
             throw ScimException::badRequest(
-                'Attribute "userName" exceeds the maximum length of ' . self::USERNAME_MAX_LENGTH . '.',
+                'Attribute "userName" exceeds the maximum length of ' . self::USER_NAME_MAX_LENGTH . '.',
                 'invalidValue'
             );
         }
 
         return $userName;
+    }
+
+    /**
+     * The `admin_user.username` login for a SCIM userName.
+     *
+     * Identical up to 40 chars; longer ones become a prefix plus a userName hash, so the
+     * result is deterministic and distinct per (case-insensitive) userName.
+     *
+     * @param string $userName validated SCIM userName
+     */
+    public function toLogin(string $userName): string
+    {
+        if (mb_strlen($userName) <= self::LOGIN_MAX_LENGTH) {
+            return $userName;
+        }
+        $hash = substr(hash('sha256', mb_strtolower($userName)), 0, self::LOGIN_HASH_LENGTH);
+
+        return mb_substr($userName, 0, self::LOGIN_MAX_LENGTH - self::LOGIN_HASH_LENGTH - 1) . '~' . $hash;
+    }
+
+    /**
+     * The SCIM userName of an admin: the stored value, else its login (rows without one).
+     *
+     * @param User $user
+     */
+    public function getUserName(User $user): string
+    {
+        $userName = (string)$user->getData(self::USER_NAME_FIELD);
+
+        return $userName !== '' ? $userName : (string)$user->getData('username');
     }
 
     /**
@@ -234,7 +272,7 @@ class ScimUserMapper
         $last = (string)$user->getData('lastname');
         $email = (string)$user->getData('email');
 
-        $resource['userName'] = (string)$user->getData('username');
+        $resource['userName'] = $this->getUserName($user);
         $resource['name'] = [
             'formatted' => trim($first . ' ' . $last),
             'givenName' => $first,

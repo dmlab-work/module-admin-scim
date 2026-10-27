@@ -26,6 +26,7 @@ class ScimUserPatcherTest extends TestCase
     protected function setUp(): void
     {
         $this->mapper = $this->createStub(ScimUserMapper::class);
+        $this->mapper->method('toLogin')->willReturnCallback(static fn (string $u): string => 'login:' . $u);
         $this->patcher = new ScimUserPatcher($this->mapper);
     }
 
@@ -132,7 +133,8 @@ class ScimUserPatcherTest extends TestCase
             $this->patchOp([['op' => 'replace', 'path' => 'userName', 'value' => ' new.name ']])
         );
 
-        self::assertSame('new.name', $captured['username']);
+        self::assertSame('new.name', $captured[ScimUserMapper::USER_NAME_FIELD]);
+        self::assertSame('login:new.name', $captured['username']);
     }
 
     public function testPathlessObjectValueAssignsEachAttribute(): void
@@ -400,7 +402,10 @@ class ScimUserPatcherTest extends TestCase
             ]])
         );
 
-        self::assertSame(['username' => 'jdoe@x.io', 'is_active' => 0], $captured);
+        self::assertSame(
+            [ScimUserMapper::USER_NAME_FIELD => 'jdoe@x.io', 'username' => 'login:jdoe@x.io', 'is_active' => 0],
+            $captured
+        );
     }
 
     public function testCoreUrnPathWithScalarValueIsRejected(): void
@@ -585,7 +590,7 @@ class ScimUserPatcherTest extends TestCase
         try {
             $this->patcher->apply(
                 $user,
-                $this->patchOp([['op' => 'replace', 'path' => 'userName', 'value' => str_repeat('a', 41)]])
+                $this->patchOp([['op' => 'replace', 'path' => 'userName', 'value' => str_repeat('a', 256)]])
             );
             self::fail('Expected ScimException');
         } catch (ScimException $e) {

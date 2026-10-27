@@ -26,9 +26,9 @@ use Magento\User\Model\UserFactory;
  *
  * Write side of User provisioning: create, PUT (full replace), PATCH
  * (partial ops, incl. `active=false` deprovisioning / `active=true`
- * reactivation) and DELETE (hard delete). An admin is keyed on the SCIM `userName` (mapped to
- * `admin_user.username`) and, when supplied, linked to its IdP resource via the
- * `externalId` column. Both must be unique — a collision is a SCIM `409`
+ * reactivation) and DELETE (hard delete). An admin is keyed on the SCIM `userName` (stored
+ * as sent; the `admin_user.username` login is derived from it, see {@see ScimUserMapper::toLogin()})
+ * and, when supplied, linked to its IdP resource via the `externalId` column. Both must be unique — a collision is a SCIM `409`
  * `uniqueness` per RFC 7644 §3.3 — so a replayed create never silently forks a
  * second account and an update never steals another admin's identifier. The
  * account password is random: login is via SSO, never this credential, but a
@@ -97,8 +97,9 @@ class UserProvisioner
         $email = $this->mapper->extractEmail($payload);
         [$firstName, $lastName] = $this->mapper->extractName($payload, $userName);
         $externalId = $this->mapper->extractExternalId($payload);
+        $login = $this->mapper->toLogin($userName);
 
-        $this->assertUnique('username', $userName, 'A user with this userName already exists.');
+        $this->assertUserNameUnique($userName, $login);
         $this->assertUnique('email', $email, 'A user with this email already exists.');
         if ($externalId !== null) {
             $this->assertUnique(
@@ -110,7 +111,8 @@ class UserProvisioner
 
         $user = $this->userFactory->create();
         $user->setData([
-            'username' => $userName,
+            'username' => $login,
+            ScimUserMapper::USER_NAME_FIELD => $userName,
             'firstname' => $firstName,
             'lastname' => $lastName,
             'email' => $email,
@@ -159,10 +161,11 @@ class UserProvisioner
         $email = $this->mapper->extractEmail($payload);
         [$firstName, $lastName] = $this->mapper->extractName($payload, $userName);
         $externalId = $this->mapper->extractExternalId($payload);
+        $login = $this->mapper->toLogin($userName);
 
         $currentId = (int)$user->getId();
         $activeBefore = (bool)(int)$user->getData('is_active');
-        $this->assertUnique('username', $userName, 'A user with this userName already exists.', $currentId);
+        $this->assertUserNameUnique($userName, $login, $currentId);
         $this->assertUnique('email', $email, 'A user with this email already exists.', $currentId);
         if ($externalId !== null) {
             $this->assertUnique(
@@ -174,7 +177,8 @@ class UserProvisioner
         }
 
         $user->addData([
-            'username' => $userName,
+            'username' => $login,
+            ScimUserMapper::USER_NAME_FIELD => $userName,
             'firstname' => $firstName,
             'lastname' => $lastName,
             'email' => $email,
@@ -218,12 +222,14 @@ class UserProvisioner
         $user = $this->repository->getById($id);
         $activeBefore = (bool)(int)$user->getData('is_active');
         $this->patcher->apply($user, $body);
+        if ((string)$user->getData(ScimUserMapper::USER_NAME_FIELD) === '') {
+            $user->setData(ScimUserMapper::USER_NAME_FIELD, (string)$user->getData('username'));
+        }
 
         $currentId = (int)$user->getId();
-        $this->assertUnique(
-            'username',
+        $this->assertUserNameUnique(
+            (string)$user->getData(ScimUserMapper::USER_NAME_FIELD),
             (string)$user->getData('username'),
-            'A user with this userName already exists.',
             $currentId
         );
         $this->assertUnique(
@@ -319,7 +325,7 @@ class UserProvisioner
      * The {@see assertUnique} pre-checks catch the common collision, but a request
      * that races another can still slip a duplicate `username`/`externalId` past
      * them and hit a DB unique index (core `ADMIN_USER_USERNAME`, this module's
-     * `DMLAB_ADMIN_SCIM_EXTERNAL_ID`). Convert that into the same SCIM `409`
+     * `DMLAB_ADMIN_SCIM_USER_NAME` / `DMLAB_ADMIN_SCIM_EXTERNAL_ID`). Convert that into the same SCIM `409`
      * `uniqueness` instead of leaking a generic 500. `admin_user.email` has no
      * unique index, so its uniqueness rests on the pre-check alone (best-effort
      * under a race); email is not a login key, so a duplicate there is harmless.
@@ -372,6 +378,23 @@ class UserProvisioner
             $userId,
             [AdminSessionInfo::LOGGED_IN]
         );
+    }
+
+    /**
+     * Reject a SCIM userName, or its derived login, that another admin already holds.
+     *
+     * The login check also covers local admins and rows without a stored userName.
+     *
+     * @param string $userName
+     * @param string $login
+     * @param int|null $excludeId admin_user.user_id to exclude (the row being updated)
+     * @throws ScimException 409 `uniqueness` when either is taken
+     */
+    private function assertUserNameUnique(string $userName, string $login, ?int $excludeId = null): void
+    {
+        $detail = 'A user with this userName already exists.';
+        $this->assertUnique(ScimUserMapper::USER_NAME_FIELD, $userName, $detail, $excludeId);
+        $this->assertUnique('username', $login, $detail, $excludeId);
     }
 
     /**

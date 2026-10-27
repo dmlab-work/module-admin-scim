@@ -9,12 +9,13 @@ namespace DmLab\AdminScim\Model\Group;
 
 use DmLab\AdminScim\Model\User\ScimUserMapper;
 use Magento\Framework\App\ResourceConnection;
+use Magento\Framework\DB\Sql\Expression;
 
 /**
  * Membership storage for SCIM Groups (`dmlab_scim_group_member`).
  *
  * Direct-connection access to the join table: read a group's members (with the
- * admin username for the SCIM `display` sub-attribute), add/remove/replace members,
+ * SCIM userName for the `display` sub-attribute), add/remove/replace members,
  * and — for role synchronization — list the group display names an admin user
  * belongs to. Member add/remove is idempotent (an INSERT IGNORE / targeted DELETE).
  */
@@ -46,7 +47,9 @@ class MemberResource
             ->join(
                 ['u' => $this->resource->getTableName(self::USER_TABLE)],
                 'u.user_id = m.user_id',
-                ['username']
+                ['username' => new Expression(
+                    'COALESCE(u.' . ScimUserMapper::USER_NAME_FIELD . ', u.username)'
+                )]
             )
             ->where('m.group_id = ?', $groupId)
             ->where('u.' . ScimUserMapper::MANAGED_FIELD . ' = ?', 1)

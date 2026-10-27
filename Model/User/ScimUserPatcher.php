@@ -28,9 +28,6 @@ class ScimUserPatcher
     /** admin_user.firstname / lastname column length. */
     private const NAME_MAX_LENGTH = 32;
 
-    /** admin_user.username column length. */
-    private const USERNAME_MAX_LENGTH = 40;
-
     /** `attr`, `attr.sub`, `attr[filter]`, `attr[filter].sub` (RFC 7644 §3.10, after the URN prefix). */
     private const PATH_PATTERN = '/^([a-z][\w$-]*)(?:\[([^\[\]]+)\])?(?:\.([a-z][\w$-]*))?$/i';
 
@@ -200,16 +197,16 @@ class ScimUserPatcher
                 break;
             case 'username':
                 $userName = $this->requiredString($value, 'userName');
-                if (mb_strlen($userName) > self::USERNAME_MAX_LENGTH) {
-                    // A login cannot be silently truncated, and an over-length value
-                    // would surface as an opaque DB 500 the IdP retries forever —
-                    // reject as 400 (mirrors ScimUserMapper::extractUserName).
+                if (mb_strlen($userName) > ScimUserMapper::USER_NAME_MAX_LENGTH) {
+                    // Mirrors ScimUserMapper::extractUserName: a 400, not an opaque DB 500 the IdP retries.
                     throw ScimException::badRequest(
-                        'Attribute "userName" exceeds the maximum length of ' . self::USERNAME_MAX_LENGTH . '.',
+                        'Attribute "userName" exceeds the maximum length of '
+                        . ScimUserMapper::USER_NAME_MAX_LENGTH . '.',
                         'invalidValue'
                     );
                 }
-                $user->setData('username', $userName);
+                $user->setData(ScimUserMapper::USER_NAME_FIELD, $userName);
+                $user->setData('username', $this->mapper->toLogin($userName));
                 break;
             case 'externalid':
                 $external = is_string($value) ? trim($value) : '';

@@ -59,7 +59,7 @@ return [
                 'path' => 'urn:ietf:params:scim:schemas:core:2.0:User',
                 'value' => ['userName' => 'jdoe@x.io'],
             ]],
-            ['username' => 'jdoe@x.io'],
+            ['dmlab_scim_user_name' => 'jdoe@x.io', 'username' => 'jdoe@x.io'],
         ],
         'entra: path-less flat keys with extension' => [
             [[

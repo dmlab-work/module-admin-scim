@@ -20,7 +20,7 @@ class FilterParser
 {
     /** SCIM attribute name (case-insensitive) → admin_user column. */
     private const SUPPORTED = [
-        'username' => 'username',
+        'username' => ScimUserMapper::USER_NAME_FIELD,
         'externalid' => ScimUserMapper::EXTERNAL_ID_FIELD,
     ];
 

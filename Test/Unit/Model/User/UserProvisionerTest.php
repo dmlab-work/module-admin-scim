@@ -83,6 +83,7 @@ class UserProvisionerTest extends TestCase
         $this->auditLogger = $this->createStub(AuditLogger::class);
         $this->sessionResource = $this->createStub(AdminSessionInfoResource::class);
         $this->guard = $this->createStub(LastAdminGuard::class);
+        $this->mapper->method('toLogin')->willReturnArgument(0);
 
         $this->provisioner = $this->provisionerWith($this->synchronizer);
     }
@@ -162,7 +163,7 @@ class UserProvisionerTest extends TestCase
         $this->mapperReturns('ext-9');
 
         // All three uniqueness lookups (username, email, externalId) miss.
-        $this->collectionFactory->expects(self::exactly(3))
+        $this->collectionFactory->expects(self::exactly(4))
             ->method('create')
             ->willReturn($this->collectionReturning($this->emptyUser()));
 
@@ -181,6 +182,7 @@ class UserProvisionerTest extends TestCase
         self::assertSame($newUser, $this->provisioner->create(['userName' => 'jane.doe']));
         self::assertSame([
             'username' => 'jane.doe',
+            ScimUserMapper::USER_NAME_FIELD => 'jane.doe',
             'firstname' => 'Jane',
             'lastname' => 'Doe',
             'email' => 'jane@example.com',
@@ -197,7 +199,7 @@ class UserProvisionerTest extends TestCase
         $this->mapperReturns(null, false);
 
         // username + email lookups run (no externalId).
-        $this->collectionFactory->expects(self::exactly(2))
+        $this->collectionFactory->expects(self::exactly(3))
             ->method('create')
             ->willReturn($this->collectionReturning($this->emptyUser()));
 
@@ -224,7 +226,7 @@ class UserProvisionerTest extends TestCase
         $this->mapperReturns(null);
 
         // username + email lookups run; the externalId lookup is skipped when absent.
-        $this->collectionFactory->expects(self::exactly(2))
+        $this->collectionFactory->expects(self::exactly(3))
             ->method('create')
             ->willReturn($this->collectionReturning($this->emptyUser()));
 
@@ -260,10 +262,11 @@ class UserProvisionerTest extends TestCase
     {
         $this->mapperReturns('ext-9');
 
-        // username + email lookups miss, externalId lookup collides.
-        $this->collectionFactory->expects(self::exactly(3))
+        // userName + login + email lookups miss, externalId lookup collides.
+        $this->collectionFactory->expects(self::exactly(4))
             ->method('create')
             ->willReturnOnConsecutiveCalls(
+                $this->collectionReturning($this->emptyUser()),
                 $this->collectionReturning($this->emptyUser()),
                 $this->collectionReturning($this->emptyUser()),
                 $this->collectionReturning($this->existingUser(7))
@@ -284,10 +287,11 @@ class UserProvisionerTest extends TestCase
     {
         $this->mapperReturns('ext-9');
 
-        // username lookup misses, email lookup collides with another admin.
-        $this->collectionFactory->expects(self::exactly(2))
+        // userName + login lookups miss, email lookup collides with another admin.
+        $this->collectionFactory->expects(self::exactly(3))
             ->method('create')
             ->willReturnOnConsecutiveCalls(
+                $this->collectionReturning($this->emptyUser()),
                 $this->collectionReturning($this->emptyUser()),
                 $this->collectionReturning($this->existingUser(7))
             );
@@ -313,7 +317,7 @@ class UserProvisionerTest extends TestCase
     {
         $this->mapperReturns('ext-9');
 
-        $this->collectionFactory->expects(self::exactly(3))
+        $this->collectionFactory->expects(self::exactly(4))
             ->method('create')
             ->willReturn($this->collectionReturning($this->emptyUser()));
 
@@ -374,7 +378,7 @@ class UserProvisionerTest extends TestCase
         $this->userFactory->expects(self::never())->method('create');
 
         // All three uniqueness lookups (username, email, externalId) miss.
-        $this->collectionFactory->expects(self::exactly(3))
+        $this->collectionFactory->expects(self::exactly(4))
             ->method('create')
             ->willReturn($this->collectionReturning($this->emptyUser()));
         $this->userResource->expects(self::once())->method('save')->with($user);
@@ -382,6 +386,7 @@ class UserProvisionerTest extends TestCase
         self::assertSame($user, $this->provisioner->replace('42', ['userName' => 'jane.doe']));
         self::assertSame([
             'username' => 'jane.doe',
+            ScimUserMapper::USER_NAME_FIELD => 'jane.doe',
             'firstname' => 'Jane',
             'lastname' => 'Doe',
             'email' => 'jane@example.com',
@@ -446,7 +451,7 @@ class UserProvisionerTest extends TestCase
             }
         );
         // username + email uniqueness checks run (externalId is null).
-        $this->collectionFactory->expects(self::exactly(2))
+        $this->collectionFactory->expects(self::exactly(3))
             ->method('create')
             ->willReturn($this->collectionReturning($this->emptyUser()));
         $this->userResource->expects(self::once())->method('save')->with($user);
@@ -468,10 +473,11 @@ class UserProvisionerTest extends TestCase
 
         $this->repository->method('getById')->willReturn($user);
         $this->userFactory->expects(self::never())->method('create');
-        // username + email miss, externalId collides with another admin.
-        $this->collectionFactory->expects(self::exactly(3))
+        // userName + login + email miss, externalId collides with another admin.
+        $this->collectionFactory->expects(self::exactly(4))
             ->method('create')
             ->willReturnOnConsecutiveCalls(
+                $this->collectionReturning($this->emptyUser()),
                 $this->collectionReturning($this->emptyUser()),
                 $this->collectionReturning($this->emptyUser()),
                 $this->collectionReturning($this->existingUser(7))
@@ -562,7 +568,7 @@ class UserProvisionerTest extends TestCase
         $user = $this->loadedUser(42, $captured);
         $this->repository->method('getById')->willReturn($user);
         $this->userFactory->expects(self::never())->method('create');
-        $this->collectionFactory->expects(self::exactly(2))
+        $this->collectionFactory->expects(self::exactly(3))
             ->method('create')
             ->willReturn($this->collectionReturning($this->emptyUser()));
         $this->userResource->expects(self::once())->method('save');
@@ -575,7 +581,7 @@ class UserProvisionerTest extends TestCase
     public function testCreateSyncsRoleOfNewUser(): void
     {
         $this->mapperReturns(null);
-        $this->collectionFactory->expects(self::exactly(2))
+        $this->collectionFactory->expects(self::exactly(3))
             ->method('create')
             ->willReturn($this->collectionReturning($this->emptyUser()));
         $newUser = $this->createStub(User::class);
@@ -597,7 +603,7 @@ class UserProvisionerTest extends TestCase
         $user = $this->loadedUser(42, $captured);
         $this->repository->method('getById')->willReturn($user);
         $this->userFactory->expects(self::never())->method('create');
-        $this->collectionFactory->expects(self::exactly(2))
+        $this->collectionFactory->expects(self::exactly(3))
             ->method('create')
             ->willReturn($this->collectionReturning($this->emptyUser()));
         $this->userResource->expects(self::once())->method('save')->with($user);
@@ -619,7 +625,7 @@ class UserProvisionerTest extends TestCase
         ]);
         $this->repository->method('getById')->willReturn($user);
         $this->userFactory->expects(self::never())->method('create');
-        $this->collectionFactory->expects(self::exactly(2))
+        $this->collectionFactory->expects(self::exactly(3))
             ->method('create')
             ->willReturn($this->collectionReturning($this->emptyUser()));
         $this->userResource->expects(self::once())->method('save')->with($user);
@@ -740,7 +746,7 @@ class UserProvisionerTest extends TestCase
     public function testCreateLogsUserCreate(): void
     {
         $this->mapperReturns(null);
-        $this->collectionFactory->expects(self::exactly(2))->method('create')
+        $this->collectionFactory->expects(self::exactly(3))->method('create')
             ->willReturn($this->collectionReturning($this->emptyUser()));
         $data = [];
         $newUser = $this->userWithData(42, $data);
@@ -764,7 +770,7 @@ class UserProvisionerTest extends TestCase
         $this->mapperReturns(null);
         $data = ['username' => 'old.name'];
         $this->repository->method('getById')->willReturn($this->userWithData(42, $data));
-        $this->collectionFactory->expects(self::exactly(2))->method('create')
+        $this->collectionFactory->expects(self::exactly(3))->method('create')
             ->willReturn($this->collectionReturning($this->emptyUser()));
         $this->userFactory->expects(self::never())->method('create');
         $this->userResource->expects(self::once())->method('save');
@@ -784,7 +790,7 @@ class UserProvisionerTest extends TestCase
                 $data['is_active'] = 0;
             }
         );
-        $this->collectionFactory->expects(self::exactly(2))->method('create')
+        $this->collectionFactory->expects(self::exactly(3))->method('create')
             ->willReturn($this->collectionReturning($this->emptyUser()));
         $this->userFactory->expects(self::never())->method('create');
         $this->userResource->expects(self::once())->method('save');
@@ -1006,7 +1012,7 @@ class UserProvisionerTest extends TestCase
     public function testCreateRollsBackWhenRoleSyncFails(): void
     {
         $this->mapperReturns(null);
-        $this->collectionFactory->expects(self::exactly(2))->method('create')
+        $this->collectionFactory->expects(self::exactly(3))->method('create')
             ->willReturn($this->collectionReturning($this->emptyUser()));
         $newUser = $this->createStub(User::class);
         $newUser->method('getId')->willReturn(42);
@@ -1026,7 +1032,7 @@ class UserProvisionerTest extends TestCase
     public function testDuplicateOnSaveRollsBackWithoutRoleSync(): void
     {
         $this->mapperReturns(null);
-        $this->collectionFactory->expects(self::exactly(2))->method('create')
+        $this->collectionFactory->expects(self::exactly(3))->method('create')
             ->willReturn($this->collectionReturning($this->emptyUser()));
         $this->userFactory->expects(self::once())->method('create')->willReturn($this->createStub(User::class));
         $this->userResource->method('save')
@@ -1044,7 +1050,7 @@ class UserProvisionerTest extends TestCase
     public function testSuccessfulWriteCommits(): void
     {
         $this->mapperReturns(null);
-        $this->collectionFactory->expects(self::exactly(2))->method('create')
+        $this->collectionFactory->expects(self::exactly(3))->method('create')
             ->willReturn($this->collectionReturning($this->emptyUser()));
         $newUser = $this->createStub(User::class);
         $newUser->method('getId')->willReturn(42);
@@ -1077,7 +1083,7 @@ class UserProvisionerTest extends TestCase
     public function testRoleChangeIsLoggedAfterCommit(): void
     {
         $this->mapperReturns(null);
-        $this->collectionFactory->expects(self::exactly(2))->method('create')
+        $this->collectionFactory->expects(self::exactly(3))->method('create')
             ->willReturn($this->collectionReturning($this->emptyUser()));
         $newUser = $this->createStub(User::class);
         $newUser->method('getId')->willReturn(42);

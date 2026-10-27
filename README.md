@@ -25,6 +25,8 @@ flagged on upgrade — check that no local admin got flagged that way).
   adoption.
 - A deactivate, delete or role strip that would leave no active admin holding a
   role is refused with `400 mutability`.
+- `userName` (up to 255 chars) is stored and returned as sent. The admin login is the
+  same value, or for one over 40 chars a prefix plus a hash suffix.
 
 ## Endpoints
 

@@ -24,7 +24,7 @@ class FilterParserTest extends TestCase
 
     public function testParsesUserNameFilter(): void
     {
-        self::assertSame(['username', 'jane.doe'], $this->parser->parse('userName eq "jane.doe"'));
+        self::assertSame(['dmlab_scim_user_name', 'jane.doe'], $this->parser->parse('userName eq "jane.doe"'));
     }
 
     public function testParsesExternalIdFilter(): void
@@ -37,12 +37,12 @@ class FilterParserTest extends TestCase
 
     public function testAttributeAndOperatorAreCaseInsensitive(): void
     {
-        self::assertSame(['username', 'jane'], $this->parser->parse('USERNAME EQ "jane"'));
+        self::assertSame(['dmlab_scim_user_name', 'jane'], $this->parser->parse('USERNAME EQ "jane"'));
     }
 
     public function testUnescapesQuotedLiteral(): void
     {
-        self::assertSame(['username', 'a"b\\c'], $this->parser->parse('userName eq "a\\"b\\\\c"'));
+        self::assertSame(['dmlab_scim_user_name', 'a"b\\c'], $this->parser->parse('userName eq "a\\"b\\\\c"'));
     }
 
     public function testRejectsUnsupportedAttribute(): void

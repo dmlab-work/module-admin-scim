@@ -15,12 +15,19 @@
              many NULLs). -->
         <column xsi:type="varchar" name="dmlab_scim_external_id" nullable="true" length="255"
                 comment="DmLab SCIM external identifier"/>
+        <!-- SCIM `userName` as sent (up to 255 chars); `username` holds the derived
+             ≤40-char login. Null on rows provisioned before it existed (backfilled). -->
+        <column xsi:type="varchar" name="dmlab_scim_user_name" nullable="true" length="255"
+                comment="DmLab SCIM userName"/>
         <!-- 1 = created by SCIM; SCIM reads and writes only these rows, local admins
              stay invisible to it. Set at create, never cleared by SCIM. -->
         <column xsi:type="smallint" name="dmlab_scim_managed" unsigned="true" nullable="false" default="0"
                 comment="DmLab SCIM managed flag"/>
         <constraint xsi:type="unique" referenceId="DMLAB_ADMIN_SCIM_EXTERNAL_ID">
             <column name="dmlab_scim_external_id"/>
+        </constraint>
+        <constraint xsi:type="unique" referenceId="DMLAB_ADMIN_SCIM_USER_NAME">
+            <column name="dmlab_scim_user_name"/>
         </constraint>
         <index referenceId="DMLAB_ADMIN_SCIM_MANAGED" indexType="btree">
             <column name="dmlab_scim_managed"/>

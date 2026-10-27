@@ -2,13 +2,15 @@
     "admin_user": {
         "column": {
             "dmlab_scim_external_id": true,
+            "dmlab_scim_user_name": true,
             "dmlab_scim_managed": true
         },
         "index": {
             "DMLAB_ADMIN_SCIM_MANAGED": true
         },
         "constraint": {
-            "DMLAB_ADMIN_SCIM_EXTERNAL_ID": true
+            "DMLAB_ADMIN_SCIM_EXTERNAL_ID": true,
+            "DMLAB_ADMIN_SCIM_USER_NAME": true
         }
     },
     "dmlab_scim_group": {

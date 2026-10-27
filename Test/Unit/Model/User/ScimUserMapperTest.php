@@ -58,10 +58,10 @@ class ScimUserMapperTest extends TestCase
     public function testExtractUserNameThrowsWhenTooLong(): void
     {
         $this->expectException(ScimException::class);
-        $this->expectExceptionMessage('exceeds the maximum length of 40');
+        $this->expectExceptionMessage('exceeds the maximum length of 255');
 
         try {
-            $this->mapper->extractUserName(['userName' => str_repeat('a', 41)]);
+            $this->mapper->extractUserName(['userName' => str_repeat('a', 256)]);
         } catch (ScimException $e) {
             self::assertSame(400, $e->getHttpStatus());
             self::assertSame('invalidValue', $e->getScimType());
@@ -71,8 +71,48 @@ class ScimUserMapperTest extends TestCase
 
     public function testExtractUserNameAcceptsMaxLength(): void
     {
-        $userName = str_repeat('a', 40);
+        $userName = str_repeat('a', 255);
         self::assertSame($userName, $this->mapper->extractUserName(['userName' => $userName]));
+    }
+
+    public function testLoginIsTheUserNameUpTo40Chars(): void
+    {
+        $userName = str_repeat('é', 40);
+        self::assertSame($userName, $this->mapper->toLogin($userName));
+    }
+
+    public function testLongUserNameGetsAShortenedDeterministicLogin(): void
+    {
+        $userName = 'firstname.lastname.department@subsidiary.example.com';
+        $login = $this->mapper->toLogin($userName);
+
+        self::assertSame(40, mb_strlen($login));
+        self::assertStringStartsWith('firstname.lastname.department', $login);
+        self::assertSame($login, $this->mapper->toLogin($userName));
+        self::assertNotSame($login, $this->mapper->toLogin($userName . 'x'));
+    }
+
+    public function testResourceUserNameIsTheStoredScimUserName(): void
+    {
+        $user = $this->createStub(User::class);
+        $user->method('getId')->willReturn(7);
+        $user->method('getData')->willReturnMap([
+            [ScimUserMapper::USER_NAME_FIELD, null, str_repeat('a', 50)],
+            ['username', null, 'aaaa~1234567890'],
+        ]);
+
+        self::assertSame(str_repeat('a', 50), $this->mapper->toResource($user)['userName']);
+    }
+
+    public function testResourceUserNameFallsBackToTheLogin(): void
+    {
+        $user = $this->createStub(User::class);
+        $user->method('getData')->willReturnMap([
+            [ScimUserMapper::USER_NAME_FIELD, null, null],
+            ['username', null, 'jane.doe'],
+        ]);
+
+        self::assertSame('jane.doe', $this->mapper->getUserName($user));
     }
 
     public function testExtractEmailThrowsWhenTooLong(): void

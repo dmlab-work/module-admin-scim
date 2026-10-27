@@ -209,7 +209,7 @@ class DiscoveryProvider
                 $this->attribute('userName', 'string', [
                     'required' => true,
                     'uniqueness' => 'server',
-                    'description' => 'Unique identifier for the user, mapped to the admin username.',
+                    'description' => 'Unique identifier for the user; the admin username is derived from it.',
                 ]),
                 $this->complexAttribute('name', [
                     $this->attribute('formatted', 'string'),

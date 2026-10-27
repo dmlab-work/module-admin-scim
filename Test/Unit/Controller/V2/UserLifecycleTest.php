@@ -230,6 +230,32 @@ class UserLifecycleTest extends TestCase
         self::assertSame('uniqueness', $error['scimType']);
     }
 
+    public function testUserNameLongerThanTheAdminLoginRoundTrips(): void
+    {
+        $userName = 'firstname.middlename.lastname@subsidiary.example.com';
+        [$status, $created] = $this->dispatch('POST', self::BASE, json_encode([
+            'schemas' => [ScimUserMapper::SCHEMA_USER],
+            'userName' => $userName,
+            'emails' => [['value' => 'fml@example.com', 'primary' => true]],
+        ]));
+        self::assertSame(201, $status);
+        self::assertSame($userName, $created['userName']);
+        $row = $this->store->rows[(int)$created['id']];
+        self::assertSame(40, mb_strlen($row['username']));
+
+        [, $list] = $this->dispatch('GET', self::BASE, '', ['filter' => 'userName eq "' . $userName . '"']);
+        self::assertSame(1, $list['totalResults']);
+        self::assertSame($userName, $list['Resources'][0]['userName']);
+
+        [$status, $patched] = $this->dispatch('PATCH', self::BASE . '/' . $created['id'], json_encode([
+            'schemas' => ['urn:ietf:params:scim:api:messages:2.0:PatchOp'],
+            'Operations' => [['op' => 'replace', 'path' => 'userName', 'value' => 'short@example.com']],
+        ]));
+        self::assertSame(200, $status);
+        self::assertSame('short@example.com', $patched['userName']);
+        self::assertSame('short@example.com', $this->store->rows[(int)$created['id']]['username']);
+    }
+
     public function testLocalAdminIsInvisibleAndImmutable(): void
     {
         $local = $this->seedLocalAdmin();
