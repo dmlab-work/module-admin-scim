@@ -15,6 +15,7 @@ use Magento\Framework\DB\Adapter\DuplicateException;
 use Magento\Framework\Exception\AlreadyExistsException;
 use Magento\Framework\Math\Random;
 use Magento\Framework\Stdlib\DateTime\DateTime;
+use Magento\Integration\Api\AdminTokenServiceInterface;
 use Magento\Security\Model\AdminSessionInfo;
 use Magento\Security\Model\ResourceModel\AdminSessionInfo as AdminSessionInfoResource;
 use Magento\User\Model\ResourceModel\User as UserResource;
@@ -59,6 +60,7 @@ class UserProvisioner
      * @param AdminSessionInfoResource $adminSessionResource
      * @param LastAdminGuard $lastAdminGuard
      * @param DateTime $dateTime
+     * @param AdminTokenServiceInterface $adminTokenService
      */
     public function __construct(
         private readonly ScimUserMapper $mapper,
@@ -73,7 +75,8 @@ class UserProvisioner
         private readonly WriteLock $writeLock,
         private readonly AdminSessionInfoResource $adminSessionResource,
         private readonly LastAdminGuard $lastAdminGuard,
-        private readonly DateTime $dateTime
+        private readonly DateTime $dateTime,
+        private readonly AdminTokenServiceInterface $adminTokenService
     ) {
     }
 
@@ -299,6 +302,7 @@ class UserProvisioner
         if ($this->userResource->delete($user) === false) {
             throw ScimException::internal('Failed to delete the user.');
         }
+        $this->adminTokenService->revokeAdminAccessToken((int)$user->getId());
         $this->auditLogger->log('user.delete', $context);
     }
 
@@ -355,7 +359,7 @@ class UserProvisioner
             $usableBefore = $activeBefore === null ? 0 : $this->lastAdminGuard->countUsable();
             $this->userResource->save($user);
             if ($activeBefore === true && (int)$user->getData('is_active') !== 1) {
-                $this->endSessions((int)$user->getId());
+                $this->revokeAccess((int)$user->getId());
             }
             $roleChanges = $this->roleSynchronizer->syncUsers([(int)$user->getId()]);
             $this->lastAdminGuard->assertUsableAdminRemains($usableBefore);
@@ -372,20 +376,22 @@ class UserProvisioner
     }
 
     /**
-     * Log out the admin's open backend sessions.
+     * Log out the admin's open backend sessions and revoke their API tokens.
      *
      * The backend session caches the user object, so core's `is_active` check on prolong
      * never sees the deactivation; Magento_Security's prolong plugin re-reads this status.
+     * Core revokes tokens in a `User::save()` plugin, which the resource-model save skips.
      *
      * @param int $userId
      */
-    private function endSessions(int $userId): void
+    private function revokeAccess(int $userId): void
     {
         $this->adminSessionResource->updateStatusByUserId(
             AdminSessionInfo::LOGGED_OUT,
             $userId,
             [AdminSessionInfo::LOGGED_IN]
         );
+        $this->adminTokenService->revokeAdminAccessToken($userId);
     }
 
     /**

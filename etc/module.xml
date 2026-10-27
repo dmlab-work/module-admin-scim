@@ -13,6 +13,7 @@
             <module name="Magento_Authorization"/>
             <module name="Magento_Config"/>
             <module name="Magento_Security"/>
+            <module name="Magento_Integration"/>
         </sequence>
     </module>
 </config>

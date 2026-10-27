@@ -23,6 +23,7 @@ use Magento\Framework\Math\Random;
 use Magento\Framework\Phrase;
 use Magento\Framework\Stdlib\DateTime\DateTime;
 use Magento\Security\Model\AdminSessionInfo;
+use Magento\Integration\Api\AdminTokenServiceInterface;
 use Magento\Security\Model\ResourceModel\AdminSessionInfo as AdminSessionInfoResource;
 use Magento\User\Model\ResourceModel\User as UserResource;
 use Magento\User\Model\ResourceModel\User\Collection;
@@ -64,6 +65,9 @@ class UserProvisionerTest extends TestCase
     /** @var AdminSessionInfoResource&\PHPUnit\Framework\MockObject\Stub */
     private $sessionResource;
 
+    /** @var AdminTokenServiceInterface&\PHPUnit\Framework\MockObject\Stub */
+    private $tokenService;
+
     /** @var LastAdminGuard&\PHPUnit\Framework\MockObject\Stub */
     private $guard;
 
@@ -86,6 +90,7 @@ class UserProvisionerTest extends TestCase
         $this->synchronizer = $this->createStub(GroupRoleSynchronizer::class);
         $this->auditLogger = $this->createStub(AuditLogger::class);
         $this->sessionResource = $this->createStub(AdminSessionInfoResource::class);
+        $this->tokenService = $this->createStub(AdminTokenServiceInterface::class);
         $this->guard = $this->createStub(LastAdminGuard::class);
         $this->mapper->method('toLogin')->willReturnArgument(0);
         $this->dateTime = $this->createStub(DateTime::class);
@@ -117,7 +122,8 @@ class UserProvisionerTest extends TestCase
             $this->writeLock(),
             $this->sessionResource,
             $this->guard,
-            $this->dateTime
+            $this->dateTime,
+            $this->tokenService
         );
     }
 
@@ -535,7 +541,8 @@ class UserProvisionerTest extends TestCase
             $this->writeLock(),
             $this->sessionResource,
             $this->guard,
-            $this->dateTime
+            $this->dateTime,
+            $this->tokenService
         );
     }
 
@@ -679,6 +686,18 @@ class UserProvisionerTest extends TestCase
         $this->provisioner->delete('42');
     }
 
+    public function testDeleteRevokesApiTokens(): void
+    {
+        $this->userFactory->expects(self::never())->method('create');
+        $this->collectionFactory->expects(self::never())->method('create');
+        $this->repository->method('getById')->willReturn($this->existingUser(42));
+        $this->userResource->expects(self::once())->method('delete')->willReturn(true);
+        $this->tokenService = $this->createMock(AdminTokenServiceInterface::class);
+        $this->tokenService->expects(self::once())->method('revokeAdminAccessToken')->with(42);
+
+        $this->provisionerWith($this->synchronizer)->delete('42');
+    }
+
     public function testDeletePropagatesNotFound(): void
     {
         $this->userFactory->expects(self::never())->method('create');
@@ -716,6 +735,9 @@ class UserProvisionerTest extends TestCase
         $this->collectionFactory->expects(self::never())->method('create');
         $this->repository->method('getById')->willReturn($this->existingUser(42));
         $this->userResource->expects(self::once())->method('delete')->willReturn(false);
+        $this->tokenService = $this->createMock(AdminTokenServiceInterface::class);
+        $this->tokenService->expects(self::never())->method('revokeAdminAccessToken');
+        $this->provisioner = $this->provisionerWith($this->synchronizer);
 
         try {
             $this->provisioner->delete('42');
@@ -818,7 +840,7 @@ class UserProvisionerTest extends TestCase
     }
 
     /**
-     * Swap in a session resource expecting the LOGGED_IN → LOGGED_OUT update for admin 42.
+     * Expect admin 42's sessions logged out (LOGGED_IN → LOGGED_OUT) and API tokens revoked.
      *
      * @param \PHPUnit\Framework\MockObject\Rule\InvocationOrder $times
      */
@@ -827,6 +849,8 @@ class UserProvisionerTest extends TestCase
         $this->sessionResource = $this->createMock(AdminSessionInfoResource::class);
         $this->sessionResource->expects($times)->method('updateStatusByUserId')
             ->with(AdminSessionInfo::LOGGED_OUT, 42, [AdminSessionInfo::LOGGED_IN]);
+        $this->tokenService = $this->createMock(AdminTokenServiceInterface::class);
+        $this->tokenService->expects(clone $times)->method('revokeAdminAccessToken')->with(42);
         $this->provisioner = $this->provisionerWith($this->synchronizer);
     }
 
@@ -1144,7 +1168,8 @@ class UserProvisionerTest extends TestCase
             new WriteLock($lockManager),
             $this->sessionResource,
             $this->guard,
-            $this->dateTime
+            $this->dateTime,
+            $this->tokenService
         );
 
         $this->expectException(ScimException::class);

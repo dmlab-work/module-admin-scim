@@ -46,7 +46,7 @@ https://<your-store>/admin-scim/v2
 | GET | `/Users/{id}` · `/Users?filter=…` | Read one · list with filter + pagination |
 | POST | `/Users/.search` | List via a SearchRequest body |
 | PUT | `/Users/{id}` | Replace the whole resource |
-| PATCH | `/Users/{id}` | Add/replace/remove attrs; `active=false` deprovisions and ends open admin sessions |
+| PATCH | `/Users/{id}` | Add/replace/remove attrs; `active=false` deprovisions, ends open admin sessions and revokes API tokens |
 | DELETE | `/Users/{id}` | Hard delete (`204`) |
 | POST | `/Groups` | Create a group (`201` + `Location`) |
 | GET | `/Groups/{id}` · `/Groups?filter=…` | Read one · list with filter + pagination |

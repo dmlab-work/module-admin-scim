@@ -31,6 +31,7 @@ use Magento\Authorization\Model\Role;
 use Magento\Authorization\Model\RoleFactory;
 use Magento\Framework\Serialize\Serializer\Json;
 use Magento\Framework\Stdlib\DateTime\DateTime;
+use Magento\Integration\Api\AdminTokenServiceInterface;
 use Magento\Security\Model\ResourceModel\AdminSessionInfo as AdminSessionInfoResource;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -90,7 +91,8 @@ class UserLifecycleTest extends TestCase
             $this->createWriteLock(),
             $this->createStub(AdminSessionInfoResource::class),
             $this->createStub(LastAdminGuard::class),
-            $this->createStub(DateTime::class)
+            $this->createStub(DateTime::class),
+            $this->createStub(AdminTokenServiceInterface::class)
         );
     }
 
