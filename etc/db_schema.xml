@@ -46,6 +46,10 @@
                 comment="SCIM displayName"/>
         <column xsi:type="varchar" name="external_id" nullable="true" length="255"
                 comment="IdP externalId"/>
+        <column xsi:type="timestamp" name="created_at" on_update="false" nullable="false"
+                default="CURRENT_TIMESTAMP" comment="Created at"/>
+        <column xsi:type="timestamp" name="updated_at" on_update="true" nullable="false"
+                default="CURRENT_TIMESTAMP" comment="Updated at"/>
         <constraint xsi:type="primary" referenceId="PRIMARY">
             <column name="group_id"/>
         </constraint>

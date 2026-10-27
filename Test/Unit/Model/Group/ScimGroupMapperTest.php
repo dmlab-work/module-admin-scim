@@ -124,6 +124,29 @@ class ScimGroupMapperTest extends TestCase
         self::assertSame('https://magento.loc/admin-scim/v2/Groups/42', $resource['meta']['location']);
     }
 
+    public function testToResourceRendersMetaTimestamps(): void
+    {
+        $group = new ScimGroup(1, 'Editors', null, '2026-01-02 03:04:05', '2026-01-03 00:00:00');
+
+        $meta = $this->mapper->toResource($group, [])['meta'];
+
+        self::assertSame('2026-01-02T03:04:05Z', $meta['created']);
+        self::assertSame('2026-01-03T00:00:00Z', $meta['lastModified']);
+        self::assertArrayNotHasKey('created', $this->mapper->toResource(new ScimGroup(2, 'X'), [])['meta']);
+    }
+
+    public function testOverLongDisplayNameAndExternalIdAreRejected(): void
+    {
+        foreach (['extractDisplayName' => 'displayName', 'extractExternalId' => 'externalId'] as $method => $key) {
+            try {
+                $this->mapper->$method([$key => str_repeat('g', 256)]);
+                self::fail('Expected ScimException');
+            } catch (ScimException $e) {
+                self::assertSame('invalidValue', $e->getScimType());
+            }
+        }
+    }
+
     public function testToResourceOmitsExternalIdWhenEmpty(): void
     {
         $group = new ScimGroup(1, 'Editors', null);

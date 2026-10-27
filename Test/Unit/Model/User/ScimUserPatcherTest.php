@@ -583,6 +583,15 @@ class ScimUserPatcherTest extends TestCase
         }
     }
 
+    public function testOverLongExternalIdIsRejected(): void
+    {
+        $this->expectException(ScimException::class);
+        $this->patcher->apply(
+            $this->createStub(User::class),
+            $this->patchOp([['op' => 'replace', 'path' => 'externalId', 'value' => str_repeat('e', 256)]])
+        );
+    }
+
     public function testOverLongUserNameIsRejected(): void
     {
         $user = $this->createStub(User::class);

@@ -59,13 +59,13 @@ class ScimGroupRepository
      */
     public function search(?string $filter, int $startIndex, int $count): array
     {
-        $parsed = $filter !== null && $filter !== '' ? $this->filterParser->parse($filter) : null;
+        $where = $filter !== null && $filter !== '' ? $this->filterParser->parse($filter) : null;
 
-        $total = $this->groupResource->count($parsed);
+        $total = $this->groupResource->count($where);
 
         $groups = [];
         if ($count > 0 && $startIndex <= $total) {
-            $groups = $this->groupResource->fetchPage($parsed, $startIndex - 1, $count);
+            $groups = $this->groupResource->fetchPage($where, $startIndex - 1, $count);
         }
 
         return ['groups' => $groups, 'total' => $total];

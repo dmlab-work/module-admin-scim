@@ -16,12 +16,14 @@ use Magento\Framework\App\Request\Http;
  * Authenticates a SCIM request against the configured bearer token.
  *
  * The IdP presents the credential as `Authorization: Bearer <token>`; it is
- * compared to the encrypted-at-rest configured token in constant time. Any
+ * compared (as SHA-256 digests, so neither content nor length leaks through timing)
+ * to the encrypted-at-rest configured token in constant time. Any
  * failure — endpoint disabled, no token configured, missing/malformed header, or
  * mismatch — throws an unauthorized {@see ScimException} with a single generic
  * message, so the endpoint never reveals whether SCIM is enabled or a token set.
  * Each failure counts towards the per-IP {@see FailedAuthThrottle}; a blocked
- * client gets a 429 before any token comparison. Failures and throttled requests
+ * client gets a 429 before any token comparison. An authenticated request then spends
+ * the token's {@see RequestBudget} (429 once exhausted). Failures and throttled requests
  * are audit-logged without the token or headers.
  */
 class BearerTokenAuthenticator
@@ -30,11 +32,13 @@ class BearerTokenAuthenticator
      * @param Config $config
      * @param FailedAuthThrottle $throttle
      * @param AuditLogger $auditLogger
+     * @param RequestBudget $requestBudget
      */
     public function __construct(
         private readonly Config $config,
         private readonly FailedAuthThrottle $throttle,
-        private readonly AuditLogger $auditLogger
+        private readonly AuditLogger $auditLogger,
+        private readonly RequestBudget $requestBudget
     ) {
     }
 
@@ -42,7 +46,8 @@ class BearerTokenAuthenticator
      * Verify the request carries the configured bearer token.
      *
      * @param Http $request
-     * @throws ScimException 429 when the client is throttled, 401 when authentication fails.
+     * @throws ScimException 429 when the client is throttled or the token's budget is spent,
+     *         401 when authentication fails.
      */
     public function authenticate(Http $request): void
     {
@@ -69,8 +74,16 @@ class BearerTokenAuthenticator
             throw $this->fail('missing_bearer', false);
         }
 
-        if (!hash_equals($configured, $provided)) {
+        // Equal-length digests: hash_equals() returns early on a length mismatch.
+        if (!hash_equals(hash('sha256', $configured), hash('sha256', $provided))) {
             throw $this->fail('token_mismatch', true);
+        }
+
+        try {
+            $this->requestBudget->consume($provided);
+        } catch (ScimException $e) {
+            $this->auditLogger->log('request.throttled');
+            throw $e;
         }
     }
 

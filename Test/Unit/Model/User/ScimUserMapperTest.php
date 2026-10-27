@@ -285,6 +285,37 @@ class ScimUserMapperTest extends TestCase
         self::assertSame('https://magento.loc/admin-scim/v2/Users/42', $resource['meta']['location']);
     }
 
+    public function testToResourceRendersMetaTimestampsInUtc(): void
+    {
+        $user = $this->createStub(User::class);
+        $user->method('getId')->willReturn(42);
+        $user->method('getData')->willReturnCallback(
+            static fn (string $field) => match ($field) {
+                'created' => '2026-01-02 03:04:05',
+                'modified' => '2026-02-03 04:05:06',
+                default => null,
+            }
+        );
+
+        $meta = $this->mapper->toResource($user)['meta'];
+
+        self::assertSame('2026-01-02T03:04:05Z', $meta['created']);
+        self::assertSame('2026-02-03T04:05:06Z', $meta['lastModified']);
+        self::assertSame(['resourceType', 'created', 'lastModified', 'location'], array_keys($meta));
+    }
+
+    public function testExtractExternalIdRejectsOverLongValue(): void
+    {
+        try {
+            $this->mapper->extractExternalId(['externalId' => str_repeat('x', 256)]);
+            self::fail('Expected ScimException');
+        } catch (ScimException $e) {
+            self::assertSame('invalidValue', $e->getScimType());
+        }
+        $max = str_repeat('x', 255);
+        self::assertSame($max, $this->mapper->extractExternalId(['externalId' => $max]));
+    }
+
     public function testToResourceOmitsExternalIdWhenUnset(): void
     {
         $user = $this->createStub(User::class);

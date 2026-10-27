@@ -8,59 +8,59 @@ declare(strict_types=1);
 namespace DmLab\AdminScim\Model\Group;
 
 use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\Filter\ExpressionParser;
+use DmLab\AdminScim\Model\Filter\SqlBuilder;
 
 /**
- * Parses the narrow SCIM filter subset this server honours for `GET /Groups`:
- * `displayName eq "value"` and `externalId eq "value"` (RFC 7644 §3.4.2.2). Only
- * these two attributes with the `eq` operator are supported — everything else is
- * a `400 invalidFilter`. Returns the group table column and literal to match on.
+ * Compiles a `GET /Groups` filter (RFC 7644 §3.4.2.2) into a condition on the group table
+ * (alias `g`). Filterable: `id`, `displayName`, `externalId` (case-exact), `members[.value]`
+ * (`eq`/`ne`/`pr`), `meta.created`, `meta.lastModified`; anything else is `400 invalidFilter`.
  */
 class GroupFilterParser
 {
-    /** SCIM attribute name (case-insensitive) → group table column. */
-    private const SUPPORTED = [
-        'displayname' => 'display_name',
-        'externalid' => 'external_id',
+    /** Alias of the group table in {@see GroupResource} list queries. */
+    public const TABLE_ALIAS = 'g';
+
+    private const MEMBERS = [
+        'type' => 'reference',
+        'table' => 'dmlab_scim_group_member',
+        'alias' => 'm',
+        'link' => 'm.group_id = g.group_id',
+        'column' => 'm.user_id',
     ];
 
-    /** `<attr> eq "<value>"`, attribute/operator case-insensitive, value double-quoted. */
-    private const PATTERN = '/^\s*(\w+)\s+eq\s+"((?:[^"\\\\]|\\\\.)*)"\s*$/i';
+    /** Filterable attribute path => {@see SqlBuilder} spec. */
+    private const ATTRIBUTES = [
+        'id' => ['column' => 'g.group_id', 'type' => 'integer'],
+        'displayname' => ['column' => 'g.display_name', 'type' => 'string'],
+        'externalid' => ['column' => 'g.external_id', 'type' => 'string', 'caseExact' => true],
+        'members' => self::MEMBERS,
+        'members.value' => self::MEMBERS,
+        'meta.created' => ['column' => 'g.created_at', 'type' => 'datetime'],
+        'meta.lastmodified' => ['column' => 'g.updated_at', 'type' => 'datetime'],
+    ];
 
     /**
-     * Resolve a filter expression to the column + value to match.
-     *
-     * @param string $filter raw `filter` query parameter
-     * @return array{0:string,1:string} `[group column, value]`
-     * @throws ScimException 400 `invalidFilter` for an unsupported attribute,
-     *         operator, or malformed expression
+     * @param ExpressionParser $parser
+     * @param SqlBuilder $sqlBuilder
      */
-    public function parse(string $filter): array
-    {
-        if (preg_match(self::PATTERN, $filter, $m) !== 1) {
-            throw ScimException::badRequest(
-                'Only "displayName eq" and "externalId eq" filters are supported.',
-                'invalidFilter'
-            );
-        }
-
-        $attribute = strtolower($m[1]);
-        if (!isset(self::SUPPORTED[$attribute])) {
-            throw ScimException::badRequest(
-                sprintf('Filtering on attribute "%s" is not supported.', $m[1]),
-                'invalidFilter'
-            );
-        }
-
-        return [self::SUPPORTED[$attribute], $this->unescape($m[2])];
+    public function __construct(
+        private readonly ExpressionParser $parser,
+        private readonly SqlBuilder $sqlBuilder
+    ) {
     }
 
     /**
-     * Unescape a SCIM double-quoted string literal (`\"` and `\\`).
+     * The SQL condition selecting the groups a filter matches.
      *
-     * @param string $value
+     * @param string $filter raw `filter` parameter
+     * @throws ScimException 400 `invalidFilter` for a malformed or unsupported filter
      */
-    private function unescape(string $value): string
+    public function parse(string $filter): string
     {
-        return preg_replace('/\\\\(["\\\\])/', '$1', $value) ?? $value;
+        return $this->sqlBuilder->build(
+            $this->parser->parse($filter, ScimGroupMapper::SCHEMA_GROUP),
+            self::ATTRIBUTES
+        );
     }
 }

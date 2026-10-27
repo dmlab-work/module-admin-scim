@@ -8,6 +8,7 @@ declare(strict_types=1);
 namespace DmLab\AdminScim\Model\User;
 
 use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\AttributeLength;
 use Magento\User\Model\User;
 
 /**
@@ -25,6 +26,8 @@ use Magento\User\Model\User;
  */
 class ScimUserPatcher
 {
+    use AttributeLength;
+
     /** admin_user.firstname / lastname column length. */
     private const NAME_MAX_LENGTH = 32;
 
@@ -196,21 +199,20 @@ class ScimUserPatcher
                 $user->setData('is_active', $this->toBool($value) ? 1 : 0);
                 break;
             case 'username':
-                $userName = $this->requiredString($value, 'userName');
-                if (mb_strlen($userName) > ScimUserMapper::USER_NAME_MAX_LENGTH) {
-                    // Mirrors ScimUserMapper::extractUserName: a 400, not an opaque DB 500 the IdP retries.
-                    throw ScimException::badRequest(
-                        'Attribute "userName" exceeds the maximum length of '
-                        . ScimUserMapper::USER_NAME_MAX_LENGTH . '.',
-                        'invalidValue'
-                    );
-                }
+                $userName = $this->assertLength(
+                    $this->requiredString($value, 'userName'),
+                    'userName',
+                    ScimUserMapper::USER_NAME_MAX_LENGTH
+                );
                 $user->setData(ScimUserMapper::USER_NAME_FIELD, $userName);
                 $user->setData('username', $this->mapper->toLogin($userName));
                 break;
             case 'externalid':
                 $external = is_string($value) ? trim($value) : '';
-                $user->setData(ScimUserMapper::EXTERNAL_ID_FIELD, $external === '' ? null : $external);
+                $user->setData(
+                    ScimUserMapper::EXTERNAL_ID_FIELD,
+                    $external === '' ? null : $this->assertLength($external, 'externalId')
+                );
                 break;
             case 'name':
                 $this->assignName($user, is_array($value) ? $value : []);

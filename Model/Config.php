@@ -35,6 +35,9 @@ class Config
     /** Provider code whose request normalizer runs; empty = auto. */
     public const XML_PATH_PROVIDER = 'dmlab_admin_scim/general/provider';
 
+    /** Authenticated requests per minute per token; 0 = unlimited. */
+    public const XML_PATH_REQUEST_LIMIT = 'dmlab_admin_scim/general/request_limit';
+
     /**
      * @param ScopeConfigInterface $scopeConfig
      * @param EncryptorInterface $encryptor
@@ -114,6 +117,16 @@ class Config
         $value = is_string($value) ? trim($value) : '';
 
         return $value === '' ? null : $value;
+    }
+
+    /**
+     * Authenticated requests allowed per token per minute; 0 (or unset) means unlimited.
+     */
+    public function getRequestLimit(): int
+    {
+        $value = $this->scopeConfig->getValue(self::XML_PATH_REQUEST_LIMIT);
+
+        return is_numeric($value) ? max(0, (int)$value) : 0;
     }
 
     /**

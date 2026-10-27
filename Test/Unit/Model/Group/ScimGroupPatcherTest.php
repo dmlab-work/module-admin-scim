@@ -46,6 +46,28 @@ class ScimGroupPatcherTest extends TestCase
         self::assertSame('New', $result['group']->displayName);
     }
 
+    public function testUrnQualifiedPathsAreAccepted(): void
+    {
+        $urn = 'urn:ietf:params:scim:schemas:core:2.0:Group';
+        $result = $this->apply(new ScimGroup(1, 'Old', 'x'), [5, 7], [
+            ['op' => 'replace', 'path' => $urn . ':displayName', 'value' => 'New'],
+            ['op' => 'remove', 'path' => $urn . ':members[value eq "5"]'],
+            ['op' => 'replace', 'path' => $urn, 'value' => [$urn . ':externalId' => 'ext-2']],
+        ]);
+
+        self::assertSame('New', $result['group']->displayName);
+        self::assertSame('ext-2', $result['group']->externalId);
+        self::assertSame([7], $result['members']);
+    }
+
+    public function testOverLongDisplayNameIsRejected(): void
+    {
+        $this->expectException(ScimException::class);
+        $this->apply(new ScimGroup(1, 'Old'), [], [
+            ['op' => 'replace', 'path' => 'displayName', 'value' => str_repeat('n', 256)],
+        ]);
+    }
+
     public function testAddMembersMergesWithoutDuplicates(): void
     {
         $result = $this->apply(new ScimGroup(1, 'G'), [5], [

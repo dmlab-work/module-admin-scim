@@ -77,6 +77,13 @@ class ConfigTest extends TestCase
         self::assertNull($this->config([Config::XML_PATH_DEFAULT_ROLE => '   '])->getDefaultRoleId());
     }
 
+    public function testGetRequestLimit(): void
+    {
+        self::assertSame(1200, $this->config([Config::XML_PATH_REQUEST_LIMIT => '1200'])->getRequestLimit());
+        self::assertSame(0, $this->config([])->getRequestLimit());
+        self::assertSame(0, $this->config([Config::XML_PATH_REQUEST_LIMIT => '-5'])->getRequestLimit());
+    }
+
     public function testGetProvider(): void
     {
         self::assertSame('azure', $this->config([Config::XML_PATH_PROVIDER => ' azure '])->getProvider());

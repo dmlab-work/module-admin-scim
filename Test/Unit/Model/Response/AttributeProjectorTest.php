@@ -15,6 +15,7 @@ class AttributeProjectorTest extends TestCase
     private const USER = 'urn:ietf:params:scim:schemas:core:2.0:User';
     private const GROUP = 'urn:ietf:params:scim:schemas:core:2.0:Group';
 
+    /** @var AttributeProjector */
     private AttributeProjector $projector;
 
     protected function setUp(): void

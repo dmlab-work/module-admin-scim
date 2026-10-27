@@ -21,6 +21,7 @@ use DmLab\AdminScim\Model\Group\ScimGroupMapper;
 use DmLab\AdminScim\Model\Group\ScimGroupPatcher;
 use DmLab\AdminScim\Model\Group\ScimGroupRepository;
 use DmLab\AdminScim\Model\Normalization\RequestNormalizerChain;
+use DmLab\AdminScim\Model\Request\ListQuery;
 use DmLab\AdminScim\Model\Response\AttributeProjector;
 use DmLab\AdminScim\Model\Response\ListResponseBuilder;
 use DmLab\AdminScim\Model\User\LastAdminGuard;
@@ -92,7 +93,7 @@ class GroupRoleLifecycleTest extends TestCase
         $this->mapper = new ScimGroupMapper($urls);
         $groupResource = $this->makeGroupResource();
         $this->memberResource = $this->makeMemberResource();
-        $this->repository = new ScimGroupRepository($groupResource, new GroupFilterParser());
+        $this->repository = new ScimGroupRepository($groupResource, $this->createStub(GroupFilterParser::class));
 
         $config = $this->createStub(Config::class);
         $config->method('getGroupRoleMap')->willReturn(['Admins' => '5']);
@@ -462,7 +463,8 @@ class GroupRoleLifecycleTest extends TestCase
             new ListResponseBuilder(),
             new Json(),
             new RequestNormalizerChain($this->createStub(Config::class)),
-            new AttributeProjector()
+            new AttributeProjector(),
+            new ListQuery()
         );
         $controller->execute();
 

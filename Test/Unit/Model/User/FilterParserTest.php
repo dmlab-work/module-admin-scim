@@ -8,69 +8,54 @@ declare(strict_types=1);
 namespace DmLab\AdminScim\Test\Unit\Model\User;
 
 use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\Filter\ExpressionParser;
+use DmLab\AdminScim\Model\Filter\SqlBuilder;
 use DmLab\AdminScim\Model\User\FilterParser;
-use DmLab\AdminScim\Model\User\ScimUserMapper;
+use DmLab\AdminScim\Test\Unit\Doubles\QuotingConnectionTrait;
 use PHPUnit\Framework\TestCase;
 
 class FilterParserTest extends TestCase
 {
+    use QuotingConnectionTrait;
+
     /** @var FilterParser */
     private FilterParser $parser;
 
     protected function setUp(): void
     {
-        $this->parser = new FilterParser();
+        $this->parser = new FilterParser(new ExpressionParser(), new SqlBuilder($this->quotingResource()));
     }
 
-    public function testParsesUserNameFilter(): void
-    {
-        self::assertSame(['dmlab_scim_user_name', 'jane.doe'], $this->parser->parse('userName eq "jane.doe"'));
-    }
-
-    public function testParsesExternalIdFilter(): void
+    public function testUserNameMatchesTheStoredScimUserNameOrTheLogin(): void
     {
         self::assertSame(
-            [ScimUserMapper::EXTERNAL_ID_FIELD, 'ext-9'],
-            $this->parser->parse('externalId eq "ext-9"')
+            "(COALESCE(main_table.dmlab_scim_user_name, main_table.username) IS NOT NULL"
+            . " AND COALESCE(main_table.dmlab_scim_user_name, main_table.username) = 'jane.doe')",
+            $this->parser->parse('userName eq "jane.doe"')
         );
     }
 
-    public function testAttributeAndOperatorAreCaseInsensitive(): void
+    public function testExternalIdIsCaseExact(): void
     {
-        self::assertSame(['dmlab_scim_user_name', 'jane'], $this->parser->parse('USERNAME EQ "jane"'));
+        self::assertStringContainsString(
+            "CAST(main_table.dmlab_scim_external_id AS BINARY) = CAST('Ext-9' AS BINARY)",
+            $this->parser->parse('urn:ietf:params:scim:schemas:core:2.0:User:externalId eq "Ext-9"')
+        );
     }
 
-    public function testUnescapesQuotedLiteral(): void
+    public function testCombinesSupportedAttributes(): void
     {
-        self::assertSame(['dmlab_scim_user_name', 'a"b\\c'], $this->parser->parse('userName eq "a\\"b\\\\c"'));
+        $sql = $this->parser->parse('active eq true and (emails co "@x.io" or name.familyName sw "D")');
+
+        self::assertStringContainsString('main_table.is_active = 1', $sql);
+        self::assertStringContainsString("main_table.email LIKE '%@x.io%'", $sql);
+        self::assertStringContainsString("main_table.lastname LIKE 'D%'", $sql);
     }
 
     public function testRejectsUnsupportedAttribute(): void
     {
         try {
-            $this->parser->parse('displayName eq "admins"');
-            self::fail('Expected ScimException');
-        } catch (ScimException $e) {
-            self::assertSame(400, $e->getHttpStatus());
-            self::assertSame('invalidFilter', $e->getScimType());
-        }
-    }
-
-    public function testRejectsUnsupportedOperator(): void
-    {
-        try {
-            $this->parser->parse('userName co "jane"');
-            self::fail('Expected ScimException');
-        } catch (ScimException $e) {
-            self::assertSame(400, $e->getHttpStatus());
-            self::assertSame('invalidFilter', $e->getScimType());
-        }
-    }
-
-    public function testRejectsMalformedExpression(): void
-    {
-        try {
-            $this->parser->parse('not a filter');
+            $this->parser->parse('title eq "Boss"');
             self::fail('Expected ScimException');
         } catch (ScimException $e) {
             self::assertSame(400, $e->getHttpStatus());

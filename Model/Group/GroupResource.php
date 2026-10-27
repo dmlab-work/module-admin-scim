@@ -8,6 +8,7 @@ declare(strict_types=1);
 namespace DmLab\AdminScim\Model\Group;
 
 use Magento\Framework\App\ResourceConnection;
+use Magento\Framework\Stdlib\DateTime\DateTime;
 
 /**
  * Persistence for the `dmlab_scim_group` table.
@@ -22,9 +23,11 @@ class GroupResource
 
     /**
      * @param ResourceConnection $resource
+     * @param DateTime $dateTime
      */
     public function __construct(
-        private readonly ResourceConnection $resource
+        private readonly ResourceConnection $resource,
+        private readonly DateTime $dateTime
     ) {
     }
 
@@ -48,18 +51,23 @@ class GroupResource
     /**
      * Persist a group. Inserts when `groupId` is null (populating it), else updates.
      *
+     * Every save bumps `updated_at`, so a membership-only change moves `meta.lastModified`.
+     *
      * @param ScimGroup $group
      */
     public function save(ScimGroup $group): void
     {
         $connection = $this->resource->getConnection();
+        $group->updatedAt = $this->dateTime->gmtDate();
         $data = [
             'display_name' => $group->displayName,
             'external_id' => $group->externalId,
+            'updated_at' => $group->updatedAt,
         ];
 
         if ($group->groupId === null) {
-            $connection->insert($this->table(), $data);
+            $group->createdAt = $group->updatedAt;
+            $connection->insert($this->table(), $data + ['created_at' => $group->createdAt]);
             $group->groupId = (int)$connection->lastInsertId($this->table());
 
             return;
@@ -102,38 +110,39 @@ class GroupResource
     }
 
     /**
-     * Count groups matching an optional `[column, value]` equality filter.
+     * Count groups matching an optional condition.
      *
-     * @param array{0:string,1:string}|null $filter
+     * @param string|null $where SQL condition over alias `g` ({@see GroupFilterParser}), or null for all
      */
-    public function count(?array $filter): int
+    public function count(?string $where): int
     {
         $connection = $this->resource->getConnection();
-        $select = $connection->select()->from($this->table(), ['count' => 'COUNT(*)']);
-        if ($filter !== null) {
-            $select->where($connection->quoteIdentifier($filter[0]) . ' = ?', $filter[1]);
+        $select = $connection->select()
+            ->from([GroupFilterParser::TABLE_ALIAS => $this->table()], ['count' => 'COUNT(*)']);
+        if ($where !== null) {
+            $select->where($where);
         }
 
         return (int)$connection->fetchOne($select);
     }
 
     /**
-     * A page of groups matching an optional filter, ordered by id.
+     * A page of groups matching an optional condition, ordered by id.
      *
-     * @param array{0:string,1:string}|null $filter `[column, value]` equality, or null
+     * @param string|null $where SQL condition over alias `g` ({@see GroupFilterParser}), or null for all
      * @param int $offset zero-based first row
      * @param int $count page size (> 0)
      * @return ScimGroup[]
      */
-    public function fetchPage(?array $filter, int $offset, int $count): array
+    public function fetchPage(?string $where, int $offset, int $count): array
     {
         $connection = $this->resource->getConnection();
         $select = $connection->select()
-            ->from($this->table())
-            ->order('group_id ASC')
+            ->from([GroupFilterParser::TABLE_ALIAS => $this->table()])
+            ->order(GroupFilterParser::TABLE_ALIAS . '.group_id ASC')
             ->limit($count, $offset);
-        if ($filter !== null) {
-            $select->where($connection->quoteIdentifier($filter[0]) . ' = ?', $filter[1]);
+        if ($where !== null) {
+            $select->where($where);
         }
 
         return array_map([$this, 'toGroup'], $connection->fetchAll($select));
@@ -149,7 +158,9 @@ class GroupResource
         return new ScimGroup(
             (int)$row['group_id'],
             (string)$row['display_name'],
-            isset($row['external_id']) && $row['external_id'] !== '' ? (string)$row['external_id'] : null
+            isset($row['external_id']) && $row['external_id'] !== '' ? (string)$row['external_id'] : null,
+            isset($row['created_at']) ? (string)$row['created_at'] : null,
+            isset($row['updated_at']) ? (string)$row['updated_at'] : null
         );
     }
 

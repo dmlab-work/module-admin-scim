@@ -8,7 +8,9 @@ declare(strict_types=1);
 namespace DmLab\AdminScim\Model\User;
 
 use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\AttributeLength;
 use DmLab\AdminScim\Model\Discovery\EndpointUrlBuilder;
+use DmLab\AdminScim\Model\Response\MetaTimestamps;
 use Magento\User\Model\User;
 
 /**
@@ -21,6 +23,9 @@ use Magento\User\Model\User;
  */
 class ScimUserMapper
 {
+    use AttributeLength;
+    use MetaTimestamps;
+
     /** Core SCIM User schema URN (RFC 7643 §4.1). */
     public const SCHEMA_USER = 'urn:ietf:params:scim:schemas:core:2.0:User';
 
@@ -76,14 +81,7 @@ class ScimUserMapper
         if ($userName === '') {
             throw ScimException::badRequest('Attribute "userName" is required.', 'invalidValue');
         }
-        if (mb_strlen($userName) > self::USER_NAME_MAX_LENGTH) {
-            throw ScimException::badRequest(
-                'Attribute "userName" exceeds the maximum length of ' . self::USER_NAME_MAX_LENGTH . '.',
-                'invalidValue'
-            );
-        }
-
-        return $userName;
+        return $this->assertLength($userName, 'userName', self::USER_NAME_MAX_LENGTH);
     }
 
     /**
@@ -120,6 +118,7 @@ class ScimUserMapper
      * The `externalId`, trimmed, or null when absent.
      *
      * @param array<string,mixed> $payload
+     * @throws ScimException 400 `invalidValue` when longer than its 255-char column
      */
     public function extractExternalId(array $payload): ?string
     {
@@ -128,7 +127,7 @@ class ScimUserMapper
         }
         $externalId = trim($payload['externalId']);
 
-        return $externalId === '' ? null : $externalId;
+        return $externalId === '' ? null : $this->assertLength($externalId, 'externalId');
     }
 
     /**
@@ -280,10 +279,9 @@ class ScimUserMapper
         ];
         $resource['emails'] = [['value' => $email, 'primary' => true]];
         $resource['active'] = (int)$user->getData('is_active') === 1;
-        $resource['meta'] = [
-            'resourceType' => 'User',
-            'location' => $this->urls->resourceUrl('Users/' . $id),
-        ];
+        $resource['meta'] = ['resourceType' => 'User']
+            + $this->metaTimestamps($user->getData('created'), $user->getData('modified'))
+            + ['location' => $this->urls->resourceUrl('Users/' . $id)];
 
         return $resource;
     }

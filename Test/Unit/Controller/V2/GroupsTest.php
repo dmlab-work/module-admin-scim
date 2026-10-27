@@ -17,6 +17,7 @@ use DmLab\AdminScim\Model\Group\ScimGroup;
 use DmLab\AdminScim\Model\Group\ScimGroupMapper;
 use DmLab\AdminScim\Model\Group\ScimGroupRepository;
 use DmLab\AdminScim\Model\Normalization\RequestNormalizerChain;
+use DmLab\AdminScim\Model\Request\ListQuery;
 use DmLab\AdminScim\Model\Response\AttributeProjector;
 use DmLab\AdminScim\Model\Response\ListResponseBuilder;
 use DmLab\AdminScim\Model\Response\ScimResponse;
@@ -80,7 +81,8 @@ class GroupsTest extends TestCase
             new ListResponseBuilder(),
             new Json(),
             new RequestNormalizerChain($this->createStub(Config::class)),
-            new AttributeProjector()
+            new AttributeProjector(),
+            new ListQuery()
         );
     }
 
@@ -244,7 +246,8 @@ class GroupsTest extends TestCase
             new ListResponseBuilder(),
             new Json(),
             new RequestNormalizerChain($this->createStub(Config::class)),
-            new AttributeProjector()
+            new AttributeProjector(),
+            new ListQuery()
         );
         $raw = $this->createStub(Raw::class);
         $this->request->method('getMethod')->willReturn('GET');

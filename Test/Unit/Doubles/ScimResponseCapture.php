@@ -20,6 +20,9 @@ class ScimResponseCapture
     /** @var string serialized JSON body of the last response */
     public string $contents = '';
 
+    /** @var array<string,string> headers set on the last response */
+    public array $headers = [];
+
     /**
      * The last response body decoded to an array.
      *

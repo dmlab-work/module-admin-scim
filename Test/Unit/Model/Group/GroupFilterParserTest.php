@@ -8,51 +8,52 @@ declare(strict_types=1);
 namespace DmLab\AdminScim\Test\Unit\Model\Group;
 
 use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\Filter\ExpressionParser;
+use DmLab\AdminScim\Model\Filter\SqlBuilder;
 use DmLab\AdminScim\Model\Group\GroupFilterParser;
+use DmLab\AdminScim\Test\Unit\Doubles\QuotingConnectionTrait;
 use PHPUnit\Framework\TestCase;
 
 class GroupFilterParserTest extends TestCase
 {
+    use QuotingConnectionTrait;
+
     /** @var GroupFilterParser */
     private GroupFilterParser $parser;
 
     protected function setUp(): void
     {
-        $this->parser = new GroupFilterParser();
+        $this->parser = new GroupFilterParser(new ExpressionParser(), new SqlBuilder($this->quotingResource()));
     }
 
-    public function testParsesDisplayNameFilter(): void
+    public function testDisplayNameFilter(): void
     {
-        self::assertSame(['display_name', 'Admins'], $this->parser->parse('displayName eq "Admins"'));
+        self::assertSame(
+            "(g.display_name IS NOT NULL AND g.display_name = 'Admins')",
+            $this->parser->parse('urn:ietf:params:scim:schemas:core:2.0:Group:displayName eq "Admins"')
+        );
     }
 
-    public function testParsesExternalIdFilterCaseInsensitively(): void
+    public function testEntraMembershipProbe(): void
     {
-        self::assertSame(['external_id', 'grp-1'], $this->parser->parse('ExternalId EQ "grp-1"'));
+        self::assertSame(
+            "((g.group_id IS NOT NULL AND g.group_id = 10) AND EXISTS (SELECT 1 FROM `dmlab_scim_group_member`"
+            . " AS m WHERE m.group_id = g.group_id AND m.user_id = 5))",
+            $this->parser->parse('id eq "10" and members[value eq "5"]')
+        );
     }
 
-    public function testUnescapesQuotedValue(): void
+    public function testExternalIdIsCaseExact(): void
     {
-        self::assertSame(['display_name', 'a"b'], $this->parser->parse('displayName eq "a\\"b"'));
+        self::assertStringContainsString(
+            "CAST(g.external_id AS BINARY) = CAST('Grp' AS BINARY)",
+            $this->parser->parse('externalId eq "Grp"')
+        );
     }
 
     public function testRejectsUnsupportedAttribute(): void
     {
         $this->expectException(ScimException::class);
-
-        try {
-            $this->parser->parse('members eq "5"');
-        } catch (ScimException $e) {
-            self::assertSame(400, $e->getHttpStatus());
-            self::assertSame('invalidFilter', $e->getScimType());
-            throw $e;
-        }
-    }
-
-    public function testRejectsMalformedExpression(): void
-    {
-        $this->expectException(ScimException::class);
-
-        $this->parser->parse('displayName co "Adm"');
+        $this->parser->parse('members.display eq "jane"');
     }
 }

@@ -40,12 +40,16 @@ class ScimResponse
      *
      * @param array<string,mixed> $payload
      * @param int $status
+     * @param array<string,string> $headers extra response headers, e.g. `Location` on a 201
      */
-    public function json(array $payload, int $status = 200): Raw
+    public function json(array $payload, int $status = 200, array $headers = []): Raw
     {
         $result = $this->rawFactory->create();
         $result->setHttpResponseCode($status);
         $result->setHeader('Content-Type', self::MEDIA_TYPE, true);
+        foreach ($headers as $name => $value) {
+            $result->setHeader($name, $value, true);
+        }
         $result->setContents($this->serializer->serialize($payload));
 
         return $result;

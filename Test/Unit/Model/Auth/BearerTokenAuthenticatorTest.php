@@ -11,6 +11,7 @@ use DmLab\AdminScim\Exception\ScimException;
 use DmLab\AdminScim\Model\Audit\AuditLogger;
 use DmLab\AdminScim\Model\Auth\BearerTokenAuthenticator;
 use DmLab\AdminScim\Model\Auth\FailedAuthThrottle;
+use DmLab\AdminScim\Model\Auth\RequestBudget;
 use DmLab\AdminScim\Model\Config;
 use Magento\Framework\App\Request\Http;
 use PHPUnit\Framework\TestCase;
@@ -21,7 +22,8 @@ class BearerTokenAuthenticatorTest extends TestCase
         ?string $configuredToken,
         bool $enabled = true,
         ?FailedAuthThrottle $throttle = null,
-        ?AuditLogger $auditLogger = null
+        ?AuditLogger $auditLogger = null,
+        ?RequestBudget $budget = null
     ): BearerTokenAuthenticator {
         $config = $this->createStub(Config::class);
         $config->method('isEnabled')->willReturn($enabled);
@@ -30,7 +32,8 @@ class BearerTokenAuthenticatorTest extends TestCase
         return new BearerTokenAuthenticator(
             $config,
             $throttle ?? $this->createStub(FailedAuthThrottle::class),
-            $auditLogger ?? $this->createStub(AuditLogger::class)
+            $auditLogger ?? $this->createStub(AuditLogger::class),
+            $budget ?? $this->createStub(RequestBudget::class)
         );
     }
 
@@ -56,6 +59,41 @@ class BearerTokenAuthenticatorTest extends TestCase
             ->authenticate($this->requestWithHeader('Bearer secret-token'));
     }
 
+    public function testValidTokenSpendsItsRequestBudget(): void
+    {
+        $budget = $this->createMock(RequestBudget::class);
+        $budget->expects(self::once())->method('consume')->with('secret-token');
+
+        $this->authenticator('secret-token', true, null, null, $budget)
+            ->authenticate($this->requestWithHeader('Bearer secret-token'));
+    }
+
+    public function testExhaustedBudgetIs429AndAudited(): void
+    {
+        $budget = $this->createStub(RequestBudget::class);
+        $budget->method('consume')->willThrowException(ScimException::tooManyRequests(30));
+        $auditLogger = $this->createMock(AuditLogger::class);
+        $auditLogger->expects(self::once())->method('log')->with('request.throttled');
+
+        try {
+            $this->authenticator('secret-token', true, null, $auditLogger, $budget)
+                ->authenticate($this->requestWithHeader('Bearer secret-token'));
+            self::fail('Expected ScimException');
+        } catch (ScimException $e) {
+            self::assertSame(429, $e->getHttpStatus());
+        }
+    }
+
+    public function testMismatchedTokenNeverSpendsBudget(): void
+    {
+        $budget = $this->createMock(RequestBudget::class);
+        $budget->expects(self::never())->method('consume');
+
+        $this->expectException(ScimException::class);
+        $this->authenticator('secret-token', true, null, null, $budget)
+            ->authenticate($this->requestWithHeader('Bearer secret-token-but-longer'));
+    }
+
     public function testBlockedClientGets429BeforeTokenCompare(): void
     {
         $config = $this->createMock(Config::class);
@@ -70,7 +108,7 @@ class BearerTokenAuthenticatorTest extends TestCase
         $auditLogger->expects(self::once())->method('log')->with('auth.throttled');
 
         try {
-            (new BearerTokenAuthenticator($config, $throttle, $auditLogger))
+            (new BearerTokenAuthenticator($config, $throttle, $auditLogger, $this->createStub(RequestBudget::class)))
                 ->authenticate($this->requestWithHeader('Bearer secret-token'));
             self::fail('Expected ScimException was not thrown.');
         } catch (ScimException $e) {

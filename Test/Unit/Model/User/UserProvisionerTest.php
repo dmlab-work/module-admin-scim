@@ -21,6 +21,7 @@ use Magento\Framework\Exception\AlreadyExistsException;
 use Magento\Framework\Lock\LockManagerInterface;
 use Magento\Framework\Math\Random;
 use Magento\Framework\Phrase;
+use Magento\Framework\Stdlib\DateTime\DateTime;
 use Magento\Security\Model\AdminSessionInfo;
 use Magento\Security\Model\ResourceModel\AdminSessionInfo as AdminSessionInfoResource;
 use Magento\User\Model\ResourceModel\User as UserResource;
@@ -66,6 +67,9 @@ class UserProvisionerTest extends TestCase
     /** @var LastAdminGuard&\PHPUnit\Framework\MockObject\Stub */
     private $guard;
 
+    /** @var DateTime&\PHPUnit\Framework\MockObject\Stub */
+    private $dateTime;
+
     /** @var UserProvisioner */
     private UserProvisioner $provisioner;
 
@@ -84,6 +88,8 @@ class UserProvisionerTest extends TestCase
         $this->sessionResource = $this->createStub(AdminSessionInfoResource::class);
         $this->guard = $this->createStub(LastAdminGuard::class);
         $this->mapper->method('toLogin')->willReturnArgument(0);
+        $this->dateTime = $this->createStub(DateTime::class);
+        $this->dateTime->method('gmtDate')->willReturn('2026-05-01 10:00:00');
 
         $this->provisioner = $this->provisionerWith($this->synchronizer);
     }
@@ -110,7 +116,8 @@ class UserProvisionerTest extends TestCase
             $auditLogger ?? $this->auditLogger,
             $this->writeLock(),
             $this->sessionResource,
-            $this->guard
+            $this->guard,
+            $this->dateTime
         );
     }
 
@@ -191,6 +198,8 @@ class UserProvisionerTest extends TestCase
             'interface_locale' => 'en_US',
             ScimUserMapper::EXTERNAL_ID_FIELD => 'ext-9',
             ScimUserMapper::MANAGED_FIELD => 1,
+            'created' => '2026-05-01 10:00:00',
+            'modified' => '2026-05-01 10:00:00',
         ], $captured);
     }
 
@@ -392,6 +401,7 @@ class UserProvisionerTest extends TestCase
             'email' => 'jane@example.com',
             'is_active' => 1,
             ScimUserMapper::EXTERNAL_ID_FIELD => 'ext-9',
+            'modified' => '2026-05-01 10:00:00',
         ], $captured);
     }
 
@@ -509,7 +519,7 @@ class UserProvisionerTest extends TestCase
             $factory,
             $this->createStub(UserResource::class),
             $this->createStub(UserCollectionFactory::class),
-            new FilterParser()
+            $this->createStub(FilterParser::class)
         );
 
         return new UserProvisioner(
@@ -524,7 +534,8 @@ class UserProvisionerTest extends TestCase
             $this->auditLogger,
             $this->writeLock(),
             $this->sessionResource,
-            $this->guard
+            $this->guard,
+            $this->dateTime
         );
     }
 
@@ -864,7 +875,8 @@ class UserProvisionerTest extends TestCase
         // Already inactive: deactivating again ends nothing new.
         $this->provisioner->patch('42', ['Operations' => [['op' => 'replace', 'path' => 'active', 'value' => false]]]);
         $data['is_active'] = '1';
-        $this->provisioner->patch('42', ['Operations' => [['op' => 'replace', 'path' => 'name.givenName', 'value' => 'J']]]);
+        $rename = ['op' => 'replace', 'path' => 'name.givenName', 'value' => 'J'];
+        $this->provisioner->patch('42', ['Operations' => [$rename]]);
     }
 
     public function testDeactivationSessionLogoutRollsBackWithTheWrite(): void
@@ -1131,7 +1143,8 @@ class UserProvisionerTest extends TestCase
             $this->auditLogger,
             new WriteLock($lockManager),
             $this->sessionResource,
-            $this->guard
+            $this->guard,
+            $this->dateTime
         );
 
         $this->expectException(ScimException::class);

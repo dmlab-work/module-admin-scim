@@ -11,6 +11,7 @@
         <dmlab_admin_scim>
             <general>
                 <enabled>0</enabled>
+                <request_limit>1200</request_limit>
             </general>
         </dmlab_admin_scim>
     </default>

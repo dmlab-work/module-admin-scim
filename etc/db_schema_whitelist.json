@@ -17,7 +17,9 @@
         "column": {
             "group_id": true,
             "display_name": true,
-            "external_id": true
+            "external_id": true,
+            "created_at": true,
+            "updated_at": true
         },
         "constraint": {
             "PRIMARY": true,

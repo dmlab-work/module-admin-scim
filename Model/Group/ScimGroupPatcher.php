@@ -8,6 +8,7 @@ declare(strict_types=1);
 namespace DmLab\AdminScim\Model\Group;
 
 use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\AttributeLength;
 
 /**
  * Applies a SCIM PATCH `PatchOp` (RFC 7644 §3.5.2) to a loaded group and its
@@ -17,9 +18,9 @@ use DmLab\AdminScim\Exception\ScimException;
  * and `members`. For `members`, `add` merges, `replace` overwrites the whole
  * collection, `remove` with a value-filtered path (`members[value eq "id"]`)
  * drops one member and a path-less `remove` clears all. `add`/`replace` treat a
- * single-valued attribute identically (RFC §3.5.2.1). Path-less operations (whose
- * `value` is an attribute→value object) are supported; their read-only `id`, `meta`
- * and `schemas` keys are ignored. IdP-specific deviations
+ * single-valued attribute identically (RFC §3.5.2.1). Paths may carry the core Group
+ * URN prefix; the bare URN, like an absent path, takes an attribute→value object whose
+ * read-only `id`, `meta` and `schemas` keys are ignored. IdP-specific deviations
  * beyond this baseline (e.g. Entra's member-remove quirk) are normalized in
  * `admin-scim-<idp>` plugins (Task 8), not here. Mutates the group model and the
  * `$memberIds` array in place; persistence and role sync live in
@@ -27,6 +28,8 @@ use DmLab\AdminScim\Exception\ScimException;
  */
 class ScimGroupPatcher
 {
+    use AttributeLength;
+
     /** `members[value eq "<id>"]`, operator case-insensitive. */
     private const MEMBER_PATH_PATTERN = '/^members\[\s*value\s+eq\s+"([^"]+)"\s*\]$/i';
 
@@ -98,7 +101,9 @@ class ScimGroupPatcher
             );
         }
 
-        $path = isset($operation['path']) && is_string($operation['path']) ? trim($operation['path']) : '';
+        $path = isset($operation['path']) && is_string($operation['path'])
+            ? $this->withoutSchema(trim($operation['path']))
+            : '';
 
         if ($op === 'remove') {
             $this->applyRemove($group, $memberIds, $path, $operation);
@@ -118,7 +123,7 @@ class ScimGroupPatcher
                 if (in_array(strtolower((string)$subPath), self::READ_ONLY_KEYS, true)) {
                     continue;
                 }
-                $this->assign($group, $memberIds, $op, (string)$subPath, $subValue);
+                $this->assign($group, $memberIds, $op, $this->withoutSchema((string)$subPath), $subValue);
             }
 
             return;
@@ -192,11 +197,11 @@ class ScimGroupPatcher
 
         switch (strtolower($path)) {
             case 'displayname':
-                $group->displayName = $this->requiredString($value, 'displayName');
+                $group->displayName = $this->assertLength($this->requiredString($value, 'displayName'), 'displayName');
                 break;
             case 'externalid':
                 $external = is_string($value) ? trim($value) : '';
-                $group->externalId = $external === '' ? null : $external;
+                $group->externalId = $external === '' ? null : $this->assertLength($external, 'externalId');
                 break;
             case 'members':
                 $ids = $this->mapper->memberValuesToIds(is_array($value) ? $value : []);
@@ -206,6 +211,21 @@ class ScimGroupPatcher
             default:
                 throw ScimException::badRequest(sprintf('Unsupported PATCH path "%s".', $path), 'invalidPath');
         }
+    }
+
+    /**
+     * A path without the core Group URN prefix; the bare URN becomes the empty (path-less) path.
+     *
+     * @param string $path
+     */
+    private function withoutSchema(string $path): string
+    {
+        if (strcasecmp($path, ScimGroupMapper::SCHEMA_GROUP) === 0) {
+            return '';
+        }
+        $prefix = ScimGroupMapper::SCHEMA_GROUP . ':';
+
+        return strncasecmp($path, $prefix, strlen($prefix)) === 0 ? substr($path, strlen($prefix)) : $path;
     }
 
     /**

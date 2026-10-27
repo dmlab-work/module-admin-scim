@@ -15,6 +15,7 @@ use DmLab\AdminScim\Model\Group\GroupRoleSynchronizer;
 use DmLab\AdminScim\Model\Group\MemberResource;
 use DmLab\AdminScim\Model\Mapping\MappingEngine;
 use DmLab\AdminScim\Model\Normalization\RequestNormalizerChain;
+use DmLab\AdminScim\Model\Request\ListQuery;
 use DmLab\AdminScim\Model\Response\AttributeProjector;
 use DmLab\AdminScim\Model\Response\ListResponseBuilder;
 use DmLab\AdminScim\Model\User\FilterParser;
@@ -29,6 +30,7 @@ use DmLab\AdminScim\Test\Unit\Doubles\ScimResponseCapture;
 use Magento\Authorization\Model\Role;
 use Magento\Authorization\Model\RoleFactory;
 use Magento\Framework\Serialize\Serializer\Json;
+use Magento\Framework\Stdlib\DateTime\DateTime;
 use Magento\Security\Model\ResourceModel\AdminSessionInfo as AdminSessionInfoResource;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
@@ -42,6 +44,9 @@ use Psr\Log\LoggerInterface;
  */
 class UserLifecycleTest extends TestCase
 {
+    /** @var array<string,string> headers of the last dispatched response */
+    private array $lastHeaders = [];
+
     use InMemoryScimTrait;
 
     private const BASE = '/admin-scim/v2/Users';
@@ -70,7 +75,7 @@ class UserLifecycleTest extends TestCase
             $this->store->userFactory,
             $this->store->userResource,
             $this->store->collectionFactory,
-            new FilterParser()
+            $this->createInMemoryFilterParser()
         );
         $this->provisioner = new UserProvisioner(
             $this->mapper,
@@ -84,7 +89,8 @@ class UserLifecycleTest extends TestCase
             $this->createStub(AuditLogger::class),
             $this->createWriteLock(),
             $this->createStub(AdminSessionInfoResource::class),
-            $this->createStub(LastAdminGuard::class)
+            $this->createStub(LastAdminGuard::class),
+            $this->createStub(DateTime::class)
         );
     }
 
@@ -235,6 +241,53 @@ class UserLifecycleTest extends TestCase
         self::assertSame('uniqueness', $error['scimType']);
     }
 
+    public function testCreateSetsLocationAndMetaTimestamps(): void
+    {
+        [$status, $created] = $this->dispatch('POST', self::BASE, json_encode([
+            'userName' => 'ann@example.com',
+        ]));
+
+        self::assertSame(201, $status);
+        self::assertSame($created['meta']['location'], $this->lastHeaders['Location']);
+        self::assertSame('https://magento.loc/admin-scim/v2/Users/' . $created['id'], $this->lastHeaders['Location']);
+    }
+
+    public function testRichFiltersAndSearchEndpoint(): void
+    {
+        $users = ['ann@example.com' => 'Ext-A', 'bob@example.com' => null, 'anna@other.io' => 'ext-c'];
+        foreach ($users as $name => $ext) {
+            [$status] = $this->dispatch('POST', self::BASE, json_encode(array_filter([
+                'userName' => $name,
+                'externalId' => $ext,
+                'active' => $name !== 'anna@other.io',
+            ], static fn ($v) => $v !== null)));
+            self::assertSame(201, $status);
+        }
+
+        $names = fn (array $list): array => array_column($list['Resources'], 'userName');
+        [, $list] = $this->dispatch('GET', self::BASE, '', ['filter' => 'userName sw "ANN" and active eq true']);
+        self::assertSame(['ann@example.com'], $names($list));
+        [, $list] = $this->dispatch('GET', self::BASE, '', ['filter' => 'not (externalId pr) or userName ew ".io"']);
+        self::assertSame(['bob@example.com', 'anna@other.io'], $names($list));
+        // externalId is case-exact.
+        [, $list] = $this->dispatch('GET', self::BASE, '', ['filter' => 'externalId eq "ext-a"']);
+        self::assertSame(0, $list['totalResults']);
+
+        [$status, $search] = $this->dispatch('POST', self::BASE . '/.search', json_encode([
+            'schemas' => ['urn:ietf:params:scim:api:messages:2.0:SearchRequest'],
+            'filter' => 'userName co "example"',
+            'attributes' => ['userName'],
+            'count' => 1,
+        ]));
+        self::assertSame(200, $status);
+        self::assertSame(2, $search['totalResults']);
+        self::assertSame(
+            [['schemas' => [ScimUserMapper::SCHEMA_USER], 'id' => '1', 'userName' => 'ann@example.com']],
+            $search['Resources']
+        );
+        self::assertCount(3, $this->store->rows);
+    }
+
     public function testUserNameLongerThanTheAdminLoginRoundTrips(): void
     {
         $userName = 'firstname.middlename.lastname@subsidiary.example.com';
@@ -371,9 +424,11 @@ class UserLifecycleTest extends TestCase
             new ListResponseBuilder(),
             new Json(),
             new RequestNormalizerChain($this->createStub(Config::class)),
-            new AttributeProjector()
+            new AttributeProjector(),
+            new ListQuery()
         );
         $controller->execute();
+        $this->lastHeaders = $capture->headers;
 
         return [$capture->status, $capture->document()];
     }

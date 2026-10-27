@@ -42,19 +42,24 @@ https://<your-store>/admin-scim/v2
 | GET | `/ServiceProviderConfig` | Advertised capabilities |
 | GET | `/ResourceTypes` · `/ResourceTypes/{id}` | All resource types · one (`404` if unknown) |
 | GET | `/Schemas` · `/Schemas/{id}` | All schema definitions · one by URN (`404` if unknown) |
-| POST | `/Users` | Create an admin user |
+| POST | `/Users` | Create an admin user (`201` + `Location`) |
 | GET | `/Users/{id}` · `/Users?filter=…` | Read one · list with filter + pagination |
+| POST | `/Users/.search` | List via a SearchRequest body |
 | PUT | `/Users/{id}` | Replace the whole resource |
 | PATCH | `/Users/{id}` | Add/replace/remove attrs; `active=false` deprovisions and ends open admin sessions |
 | DELETE | `/Users/{id}` | Hard delete (`204`) |
-| POST | `/Groups` | Create a group |
+| POST | `/Groups` | Create a group (`201` + `Location`) |
 | GET | `/Groups/{id}` · `/Groups?filter=…` | Read one · list with filter + pagination |
+| POST | `/Groups/.search` | List via a SearchRequest body |
 | PUT | `/Groups/{id}` | Replace name, externalId and members |
 | PATCH | `/Groups/{id}` | Attribute + member add/replace/remove |
 | DELETE | `/Groups/{id}` | Delete (`204`); former members' roles re-derived |
 
-Other verbs (e.g. `HEAD`, `OPTIONS`) answer `501 Not Implemented`; `401` carries `WWW-Authenticate: Bearer`. Errors use the RFC 7644 error
-schema (`urn:ietf:params:scim:api:messages:2.0:Error`) with the correct status.
+Other verbs (e.g. `HEAD`, `OPTIONS`) and `/Me`, `/Bulk`, root `/.search` answer
+`501 Not Implemented`; unknown paths a SCIM `404`; `401` carries `WWW-Authenticate: Bearer`.
+Errors use the RFC 7644 error schema (`urn:ietf:params:scim:api:messages:2.0:Error`)
+with the correct status. Resources carry `meta.created` / `meta.lastModified`;
+`externalId` and `displayName` over 255 chars are `400 invalidValue`.
 
 ## Setup
 
@@ -68,11 +73,13 @@ schema (`urn:ietf:params:scim:api:messages:2.0:Error`) with the correct status.
 5. **Bearer Token** — set a long random value. It is stored encrypted and is the
    credential the IdP presents. Point your IdP's SCIM app at the base URL above and
    configure it to send `Authorization: Bearer <token>`.
-6. **Group → Role Map** — one `displayName=role_id` per line, mapping a SCIM group
+6. **Request Limit** — requests per minute the token may make (default `1200`);
+   beyond it `429` with `Retry-After`. `0` disables it.
+7. **Group → Role Map** — one `displayName=role_id` per line, mapping a SCIM group
    to a Magento admin role id (`#` lines ignored). A provisioned member gets the
    first matching role (admins hold a single role). `displayName` is not unique: a
    rule applies to every group with that name.
-7. **Default Role Id** — role assigned when an admin's groups match no rule,
+8. **Default Role Id** — role assigned when an admin's groups match no rule,
    including admins created with no groups (applied at user create/update). Leave
    empty to deny (no role).
 
@@ -83,7 +90,7 @@ Advertised honestly in `ServiceProviderConfig`:
 | Feature | Supported |
 |---|---|
 | PATCH | ✅ |
-| Filter (`userName eq`, `externalId eq`, `displayName eq`) | ✅ (max 200 results) |
+| Filter (`eq ne co sw ew gt ge lt le pr`, `and` `or` `not`, value paths) | ✅ (max 200 results) |
 | Pagination (`startIndex`, `count`) | ✅ |
 | `attributes` / `excludedAttributes` | ✅ |
 | Bulk | ❌ |
@@ -91,6 +98,12 @@ Advertised honestly in `ServiceProviderConfig`:
 | ETag | ❌ |
 | Change password | ❌ |
 | Auth scheme | OAuth Bearer Token (RFC 6750) |
+
+Filterable attributes — Users: `id`, `userName`, `externalId`, `emails[.value]`,
+`name.givenName`, `name.familyName`, `active`, `meta.created`, `meta.lastModified`.
+Groups: `id`, `displayName`, `externalId`, `members[.value]` (`eq`/`ne`/`pr`),
+`meta.created`, `meta.lastModified`. String matching is case-insensitive except
+`externalId`; others are `400 invalidFilter`.
 
 ## Provider quirks
 
@@ -112,7 +125,7 @@ complex attrs) are absorbed by a per-IdP plugin via a normalization seam:
 ## Security notes
 
 - The bearer token is a full admin-provisioning credential. It is stored encrypted
-  (Magento `Encrypted` backend model) and compared in constant time (`hash_equals`).
+  (Magento `Encrypted` backend model) and compared as SHA-256 digests in constant time.
 - Rotate the token by setting a new value; the old value stops working immediately.
 - The endpoint is **disabled by default** and every request must authenticate —
   there is no anonymous read path.

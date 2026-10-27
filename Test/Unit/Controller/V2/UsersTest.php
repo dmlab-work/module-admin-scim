@@ -13,6 +13,7 @@ use DmLab\AdminScim\Exception\ScimException;
 use DmLab\AdminScim\Model\Auth\BearerTokenAuthenticator;
 use DmLab\AdminScim\Model\Config;
 use DmLab\AdminScim\Model\Normalization\RequestNormalizerChain;
+use DmLab\AdminScim\Model\Request\ListQuery;
 use DmLab\AdminScim\Model\Response\AttributeProjector;
 use DmLab\AdminScim\Model\Response\ListResponseBuilder;
 use DmLab\AdminScim\Model\Response\ScimResponse;
@@ -74,7 +75,8 @@ class UsersTest extends TestCase
             new ListResponseBuilder(),
             new Json(),
             new RequestNormalizerChain($this->createStub(Config::class)),
-            new AttributeProjector()
+            new AttributeProjector(),
+            new ListQuery()
         );
     }
 
@@ -426,7 +428,8 @@ class UsersTest extends TestCase
             new ListResponseBuilder(),
             new Json(),
             new RequestNormalizerChain($this->createStub(Config::class), ['test' => $normalizer]),
-            new AttributeProjector()
+            new AttributeProjector(),
+            new ListQuery()
         );
 
         $created = $this->createStub(User::class);

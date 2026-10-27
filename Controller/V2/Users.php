@@ -11,8 +11,8 @@ use DmLab\AdminScim\Api\RequestNormalizerInterface;
 use DmLab\AdminScim\Controller\AbstractScim;
 use DmLab\AdminScim\Exception\ScimException;
 use DmLab\AdminScim\Model\Auth\BearerTokenAuthenticator;
-use DmLab\AdminScim\Model\Discovery\DiscoveryProvider;
 use DmLab\AdminScim\Model\Normalization\RequestNormalizerChain;
+use DmLab\AdminScim\Model\Request\ListQuery;
 use DmLab\AdminScim\Model\Response\AttributeProjector;
 use DmLab\AdminScim\Model\Response\ListResponseBuilder;
 use DmLab\AdminScim\Model\Response\ScimResponse;
@@ -28,17 +28,17 @@ use Psr\Log\LoggerInterface;
 /**
  * `/admin-scim/v2/Users` — the SCIM User collection endpoint.
  *
- * Serves POST (create), GET (read one by `id`, or list with the supported
- * filter subset + pagination), PUT (full replace), PATCH (partial ops incl.
- * `active` deprovisioning) and DELETE (hard delete, 204). Returned resources honour
- * `attributes` / `excludedAttributes`. Unsupported verbs answer `501 Not Implemented`; a
- * single action class serves every verb because Magento routes the whole
- * `Users` path here.
+ * Serves POST (create, `201` with `Location`), GET (read one by `id`, or list with
+ * filter + pagination), `POST /Users/.search`, PUT (full replace), PATCH (partial ops
+ * incl. `active` deprovisioning) and DELETE (hard delete, 204). Returned resources
+ * honour `attributes` / `excludedAttributes`. Unsupported verbs answer `501 Not
+ * Implemented`; a single action class serves every verb because Magento routes the
+ * whole `Users` path here.
  */
 class Users extends AbstractScim
 {
-    /** Page size when the client sends no `count`. */
-    private const DEFAULT_COUNT = 100;
+    /** Path segment of the search endpoint (RFC 7644 §3.4.3). */
+    private const SEARCH = '.search';
 
     /**
      * @param Http $request
@@ -52,6 +52,7 @@ class Users extends AbstractScim
      * @param Json $serializer
      * @param RequestNormalizerChain $normalizerChain
      * @param AttributeProjector $projector
+     * @param ListQuery $listQuery
      */
     public function __construct(
         Http $request,
@@ -64,7 +65,8 @@ class Users extends AbstractScim
         private readonly ListResponseBuilder $listBuilder,
         private readonly Json $serializer,
         private readonly RequestNormalizerChain $normalizerChain,
-        private readonly AttributeProjector $projector
+        private readonly AttributeProjector $projector,
+        private readonly ListQuery $listQuery
     ) {
         parent::__construct($request, $authenticator, $response, $logger);
     }
@@ -74,7 +76,12 @@ class Users extends AbstractScim
      */
     protected function handle(): ResultInterface
     {
-        return match (strtoupper($this->request->getMethod())) {
+        $method = strtoupper($this->request->getMethod());
+        if ($method === 'POST' && $this->resourceId() === self::SEARCH) {
+            return $this->listUsers($this->listQuery->fromSearchBody($this->decodeBody()));
+        }
+
+        return match ($method) {
             'POST' => $this->create(),
             'GET' => $this->read(),
             'PUT' => $this->replace(),
@@ -85,15 +92,18 @@ class Users extends AbstractScim
     }
 
     /**
-     * Create an admin user from the request's SCIM User body.
-     *
-     * Returns the created resource with a `201`.
+     * Create an admin user from the request's SCIM User body; `201` with its `Location`.
      */
     private function create(): ResultInterface
     {
-        $user = $this->provisioner->create($this->parseBody());
+        $resource = $this->mapper->toResource($this->provisioner->create($this->parseBody()));
+        $location = $resource['meta']['location'] ?? null;
 
-        return $this->response->json($this->render($user), 201);
+        return $this->response->json(
+            $this->project($resource),
+            201,
+            is_string($location) ? ['Location' => $location] : []
+        );
     }
 
     /**
@@ -103,7 +113,7 @@ class Users extends AbstractScim
     {
         $user = $this->provisioner->replace($this->requireResourceId(), $this->parseBody());
 
-        return $this->response->json($this->render($user));
+        return $this->response->json($this->project($this->mapper->toResource($user)));
     }
 
     /**
@@ -113,7 +123,7 @@ class Users extends AbstractScim
     {
         $user = $this->provisioner->patch($this->requireResourceId(), $this->parseBody());
 
-        return $this->response->json($this->render($user));
+        return $this->response->json($this->project($this->mapper->toResource($user)));
     }
 
     /**
@@ -133,42 +143,49 @@ class Users extends AbstractScim
     {
         $id = $this->resourceId();
         if ($id !== null) {
-            return $this->response->json($this->render($this->repository->getById($id)));
+            return $this->response->json($this->project($this->mapper->toResource($this->repository->getById($id))));
         }
 
-        return $this->listUsers();
+        return $this->listUsers($this->listQuery->fromQuery($this->request));
     }
 
     /**
-     * List admin users with the supported filter subset and pagination.
+     * List admin users per the given list/search parameters.
+     *
+     * @param array{filter:?string,startIndex:int,count:int,attributes:?string,excludedAttributes:?string} $query
      */
-    private function listUsers(): ResultInterface
+    private function listUsers(array $query): ResultInterface
     {
-        $filter = trim((string)$this->request->getParam('filter'));
-        $startIndex = $this->intParam('startIndex', 1, 1);
-        $count = $this->intParam('count', self::DEFAULT_COUNT, 0, DiscoveryProvider::FILTER_MAX_RESULTS);
-
-        $result = $this->repository->search($filter === '' ? null : $filter, $startIndex, $count);
-        $resources = array_map(fn (User $user): array => $this->render($user), $result['users']);
+        $result = $this->repository->search($query['filter'], $query['startIndex'], $query['count']);
+        $resources = array_map(
+            fn (User $user): array => $this->project(
+                $this->mapper->toResource($user),
+                $query['attributes'],
+                $query['excludedAttributes']
+            ),
+            $result['users']
+        );
 
         return $this->response->json(
-            $this->listBuilder->build($resources, $result['total'], $startIndex, count($resources))
+            $this->listBuilder->build($resources, $result['total'], $query['startIndex'], count($resources))
         );
     }
 
     /**
-     * A user as a SCIM resource, projected per the request's `attributes` / `excludedAttributes`.
+     * A rendered user projected per `attributes` / `excludedAttributes` (from the query string by default).
      *
-     * @param User $user
+     * @param array<string,mixed> $resource
+     * @param string|null $attributes
+     * @param string|null $excluded
      * @return array<string,mixed>
      */
-    private function render(User $user): array
+    private function project(array $resource, ?string $attributes = null, ?string $excluded = null): array
     {
         return $this->projector->project(
-            $this->mapper->toResource($user),
+            $resource,
             ScimUserMapper::SCHEMA_USER,
-            $this->stringParam('attributes'),
-            $this->stringParam('excludedAttributes')
+            $attributes ?? $this->stringParam('attributes'),
+            $excluded ?? $this->stringParam('excludedAttributes')
         );
     }
 
@@ -177,20 +194,7 @@ class Users extends AbstractScim
      */
     private function resourceId(): ?string
     {
-        $path = trim((string)$this->request->getPathInfo(), '/');
-        if ($path === '') {
-            return null;
-        }
-
-        $segments = explode('/', $path);
-        foreach ($segments as $i => $segment) {
-            if (strcasecmp($segment, 'Users') === 0) {
-                $id = trim($segments[$i + 1] ?? '');
-                return $id === '' ? null : $id;
-            }
-        }
-
-        return null;
+        return $this->pathSegmentAfter('Users');
     }
 
     /**
@@ -209,29 +213,12 @@ class Users extends AbstractScim
     }
 
     /**
-     * A non-negative integer query parameter, clamped to `[$min, $max]`.
-     *
-     * @param string $name
-     * @param int $default value when absent or non-numeric
-     * @param int $min lower clamp
-     * @param int|null $max upper clamp, or null for none
-     */
-    private function intParam(string $name, int $default, int $min, ?int $max = null): int
-    {
-        $raw = $this->request->getParam($name);
-        $value = is_numeric($raw) ? (int)$raw : $default;
-        $value = max($min, $value);
-
-        return $max !== null ? min($max, $value) : $value;
-    }
-
-    /**
-     * Decode the request body as a SCIM JSON object.
+     * Decode the request body as a JSON object.
      *
      * @return array<string,mixed>
      * @throws ScimException 400 `invalidSyntax` when the body is not a JSON object
      */
-    private function parseBody(): array
+    private function decodeBody(): array
     {
         $raw = (string)$this->request->getContent();
         try {
@@ -244,10 +231,21 @@ class Users extends AbstractScim
             throw ScimException::badRequest('Request body must be a JSON object.', 'invalidSyntax');
         }
 
+        return $decoded;
+    }
+
+    /**
+     * Decode the request body as a SCIM User and run the active provider normalizer.
+     *
+     * @return array<string,mixed>
+     * @throws ScimException 400 `invalidSyntax` when the body is not a JSON object
+     */
+    private function parseBody(): array
+    {
         return $this->normalizerChain->apply(
             RequestNormalizerInterface::RESOURCE_USER,
             strtoupper($this->request->getMethod()),
-            $decoded
+            $this->decodeBody()
         );
     }
 }

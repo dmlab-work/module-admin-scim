@@ -43,6 +43,15 @@
                         <field id="enabled">1</field>
                     </depends>
                 </field>
+                <field id="request_limit" translate="label comment" type="text" sortOrder="25"
+                       showInDefault="1" showInWebsite="0" showInStore="0">
+                    <label>Request Limit</label>
+                    <validate>validate-digits</validate>
+                    <comment><![CDATA[Requests per minute the bearer token may make; beyond it the endpoint answers <code>429</code> with <code>Retry-After</code>. <code>0</code> disables the limit.]]></comment>
+                    <depends>
+                        <field id="enabled">1</field>
+                    </depends>
+                </field>
                 <field id="group_role_map" translate="label comment" type="textarea" sortOrder="30"
                        showInDefault="1" showInWebsite="0" showInStore="0">
                     <label>Group → Role Map</label>

@@ -57,6 +57,22 @@ class ScimResponseTest extends TestCase
         $this->response($raw)->json(['id' => 'abc'], 201);
     }
 
+    public function testJsonSetsExtraHeaders(): void
+    {
+        $headers = [];
+        $raw = $this->createStub(Raw::class);
+        $raw->method('setHttpResponseCode')->willReturnSelf();
+        $raw->method('setContents')->willReturnSelf();
+        $raw->method('setHeader')->willReturnCallback(function ($name, $value) use (&$headers, $raw) {
+            $headers[$name] = $value;
+            return $raw;
+        });
+
+        $this->response($raw)->json(['id' => '7'], 201, ['Location' => 'https://x/Users/7']);
+
+        self::assertSame('https://x/Users/7', $headers['Location']);
+    }
+
     public function testNoContentIs204WithEmptyBodyAndNoContentType(): void
     {
         $raw = $this->createMock(Raw::class);

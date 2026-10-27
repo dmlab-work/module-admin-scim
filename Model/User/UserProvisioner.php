@@ -14,6 +14,7 @@ use DmLab\AdminScim\Model\WriteLock;
 use Magento\Framework\DB\Adapter\DuplicateException;
 use Magento\Framework\Exception\AlreadyExistsException;
 use Magento\Framework\Math\Random;
+use Magento\Framework\Stdlib\DateTime\DateTime;
 use Magento\Security\Model\AdminSessionInfo;
 use Magento\Security\Model\ResourceModel\AdminSessionInfo as AdminSessionInfoResource;
 use Magento\User\Model\ResourceModel\User as UserResource;
@@ -26,9 +27,10 @@ use Magento\User\Model\UserFactory;
  *
  * Write side of User provisioning: create, PUT (full replace), PATCH
  * (partial ops, incl. `active=false` deprovisioning / `active=true`
- * reactivation) and DELETE (hard delete). An admin is keyed on the SCIM `userName` (stored
- * as sent; the `admin_user.username` login is derived from it, see {@see ScimUserMapper::toLogin()})
- * and, when supplied, linked to its IdP resource via the `externalId` column. Both must be unique — a collision is a SCIM `409`
+ * reactivation) and DELETE (hard delete). An admin is keyed on the SCIM `userName`
+ * (stored as sent; the `admin_user.username` login is derived from it, see
+ * {@see ScimUserMapper::toLogin()}) and, when supplied, linked to its IdP resource via
+ * the `externalId` column. Both must be unique — a collision is a SCIM `409`
  * `uniqueness` per RFC 7644 §3.3 — so a replayed create never silently forks a
  * second account and an update never steals another admin's identifier. The
  * account password is random: login is via SSO, never this credential, but a
@@ -56,6 +58,7 @@ class UserProvisioner
      * @param WriteLock $writeLock
      * @param AdminSessionInfoResource $adminSessionResource
      * @param LastAdminGuard $lastAdminGuard
+     * @param DateTime $dateTime
      */
     public function __construct(
         private readonly ScimUserMapper $mapper,
@@ -69,7 +72,8 @@ class UserProvisioner
         private readonly AuditLogger $auditLogger,
         private readonly WriteLock $writeLock,
         private readonly AdminSessionInfoResource $adminSessionResource,
-        private readonly LastAdminGuard $lastAdminGuard
+        private readonly LastAdminGuard $lastAdminGuard,
+        private readonly DateTime $dateTime
     ) {
     }
 
@@ -121,6 +125,8 @@ class UserProvisioner
             'interface_locale' => 'en_US',
             ScimUserMapper::EXTERNAL_ID_FIELD => $externalId,
             ScimUserMapper::MANAGED_FIELD => 1,
+            'created' => $this->dateTime->gmtDate(),
+            'modified' => $this->dateTime->gmtDate(),
         ]);
         $roleChanges = $this->write($user, null);
         $this->auditLogger->log('user.create', $this->auditContext($user));
@@ -184,6 +190,7 @@ class UserProvisioner
             'email' => $email,
             'is_active' => $this->mapper->extractActive($payload) ? 1 : 0,
             ScimUserMapper::EXTERNAL_ID_FIELD => $externalId,
+            'modified' => $this->dateTime->gmtDate(),
         ]);
         $roleChanges = $this->write($user, $activeBefore);
         $this->auditLogger->log('user.replace', $this->auditContext($user));
@@ -225,6 +232,7 @@ class UserProvisioner
         if ((string)$user->getData(ScimUserMapper::USER_NAME_FIELD) === '') {
             $user->setData(ScimUserMapper::USER_NAME_FIELD, (string)$user->getData('username'));
         }
+        $user->setData('modified', $this->dateTime->gmtDate());
 
         $currentId = (int)$user->getId();
         $this->assertUserNameUnique(

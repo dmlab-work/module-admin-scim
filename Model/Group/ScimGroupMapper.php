@@ -8,7 +8,9 @@ declare(strict_types=1);
 namespace DmLab\AdminScim\Model\Group;
 
 use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\AttributeLength;
 use DmLab\AdminScim\Model\Discovery\EndpointUrlBuilder;
+use DmLab\AdminScim\Model\Response\MetaTimestamps;
 
 /**
  * Pure translation between a SCIM Group payload and the persisted group.
@@ -19,6 +21,9 @@ use DmLab\AdminScim\Model\Discovery\EndpointUrlBuilder;
  */
 class ScimGroupMapper
 {
+    use AttributeLength;
+    use MetaTimestamps;
+
     /** Core SCIM Group schema URN (RFC 7643 §4.2). */
     public const SCHEMA_GROUP = 'urn:ietf:params:scim:schemas:core:2.0:Group';
 
@@ -34,7 +39,7 @@ class ScimGroupMapper
      * The required `displayName`, trimmed.
      *
      * @param array<string,mixed> $payload
-     * @throws ScimException 400 `invalidValue` when absent or empty
+     * @throws ScimException 400 `invalidValue` when absent, empty or longer than 255 chars
      */
     public function extractDisplayName(array $payload): string
     {
@@ -45,13 +50,14 @@ class ScimGroupMapper
             throw ScimException::badRequest('Attribute "displayName" is required.', 'invalidValue');
         }
 
-        return $displayName;
+        return $this->assertLength($displayName, 'displayName');
     }
 
     /**
      * The `externalId`, trimmed, or null when absent.
      *
      * @param array<string,mixed> $payload
+     * @throws ScimException 400 `invalidValue` when longer than 255 chars
      */
     public function extractExternalId(array $payload): ?string
     {
@@ -60,7 +66,7 @@ class ScimGroupMapper
         }
         $externalId = trim($payload['externalId']);
 
-        return $externalId === '' ? null : $externalId;
+        return $externalId === '' ? null : $this->assertLength($externalId, 'externalId');
     }
 
     /**
@@ -161,10 +167,9 @@ class ScimGroupMapper
             ],
             $members
         );
-        $resource['meta'] = [
-            'resourceType' => 'Group',
-            'location' => $this->urls->resourceUrl('Groups/' . $id),
-        ];
+        $resource['meta'] = ['resourceType' => 'Group']
+            + $this->metaTimestamps($group->createdAt, $group->updatedAt)
+            + ['location' => $this->urls->resourceUrl('Groups/' . $id)];
 
         return $resource;
     }

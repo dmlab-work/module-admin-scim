@@ -57,4 +57,19 @@ class DiConfigTest extends TestCase
         // Framework\Logger\Monolog carries app/etc/di.xml's system/debug/syslog handlers.
         self::assertSame('Monolog\Logger', $type->item(0)->nodeValue);
     }
+
+    public function testFallbackRouterRunsAfterTheStandardRouter(): void
+    {
+        $dom = new \DOMDocument();
+        self::assertTrue($dom->load(dirname(__DIR__, 2) . '/etc/frontend/di.xml'));
+        $xpath = new \DOMXPath($dom);
+        $item = '/config/type[@name="Magento\Framework\App\RouterList"]/arguments/argument'
+            . '/item[@name="dmlab_admin_scim"]';
+
+        self::assertSame(
+            'DmLab\AdminScim\Controller\Router',
+            trim($xpath->query($item . '/item[@name="class"]')->item(0)->textContent)
+        );
+        self::assertGreaterThan(30, (int)$xpath->query($item . '/item[@name="sortOrder"]')->item(0)->textContent);
+    }
 }

@@ -12,6 +12,7 @@ use DmLab\AdminScim\Model\Group\ScimGroup;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Adapter\Pdo\Mysql;
 use Magento\Framework\DB\Select;
+use Magento\Framework\Stdlib\DateTime\DateTime;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
@@ -39,7 +40,10 @@ class GroupResourceTest extends TestCase
         $resourceConnection->method('getConnection')->willReturn($this->connection);
         $resourceConnection->method('getTableName')->willReturnArgument(0);
 
-        $this->resource = new GroupResource($resourceConnection);
+        $dateTime = $this->createStub(DateTime::class);
+        $dateTime->method('gmtDate')->willReturn('2026-05-01 10:00:00');
+
+        $this->resource = new GroupResource($resourceConnection, $dateTime);
     }
 
     public function testGetByIdMapsRow(): void
@@ -80,7 +84,13 @@ class GroupResourceTest extends TestCase
         $this->resource->save($group);
 
         self::assertSame(10, $group->groupId);
-        self::assertSame(['display_name' => 'Admins', 'external_id' => 'grp-1'], $captured);
+        self::assertSame([
+            'display_name' => 'Admins',
+            'external_id' => 'grp-1',
+            'updated_at' => '2026-05-01 10:00:00',
+            'created_at' => '2026-05-01 10:00:00',
+        ], $captured);
+        self::assertSame('2026-05-01 10:00:00', $group->createdAt);
     }
 
     public function testSaveUpdatesWhenIdPresent(): void
@@ -88,9 +98,14 @@ class GroupResourceTest extends TestCase
         $group = new ScimGroup(10, 'Renamed', null);
         $this->connection->expects(self::never())->method('insert');
         $this->connection->expects(self::once())->method('update')
-            ->with('dmlab_scim_group', ['display_name' => 'Renamed', 'external_id' => null], self::anything());
+            ->with(
+                'dmlab_scim_group',
+                ['display_name' => 'Renamed', 'external_id' => null, 'updated_at' => '2026-05-01 10:00:00'],
+                self::anything()
+            );
 
         $this->resource->save($group);
+        self::assertSame('2026-05-01 10:00:00', $group->updatedAt);
     }
 
     public function testDeleteRemovesRowById(): void
@@ -119,7 +134,7 @@ class GroupResourceTest extends TestCase
     {
         $this->connection->expects(self::once())->method('fetchOne')->willReturn('3');
 
-        self::assertSame(3, $this->resource->count(['display_name', 'Admins']));
+        self::assertSame(3, $this->resource->count("(g.display_name = 'Admins')"));
     }
 
     public function testFetchPageMapsRows(): void

@@ -77,11 +77,11 @@ class ScimGroupRepositoryTest extends TestCase
 
     public function testSearchAppliesParsedFilter(): void
     {
-        $this->filterParser->method('parse')->willReturn(['display_name', 'Admins']);
+        $this->filterParser->method('parse')->willReturn("(g.display_name = 'Admins')");
         $this->groupResource->expects(self::once())->method('count')
-            ->with(['display_name', 'Admins'])->willReturn(1);
+            ->with("(g.display_name = 'Admins')")->willReturn(1);
         $this->groupResource->expects(self::once())->method('fetchPage')
-            ->with(['display_name', 'Admins'], 0, 10)->willReturn([]);
+            ->with("(g.display_name = 'Admins')", 0, 10)->willReturn([]);
 
         $this->repository->search('displayName eq "Admins"', 1, 10);
     }

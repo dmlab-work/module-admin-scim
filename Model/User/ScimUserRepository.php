@@ -76,8 +76,7 @@ class ScimUserRepository
         $collection->addFieldToFilter(ScimUserMapper::MANAGED_FIELD, 1);
 
         if ($filter !== null && $filter !== '') {
-            [$field, $value] = $this->filterParser->parse($filter);
-            $collection->addFieldToFilter($field, $value);
+            $collection->getSelect()->where($this->filterParser->parse($filter));
         }
 
         $total = (int)$collection->getSize();

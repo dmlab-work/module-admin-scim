@@ -8,6 +8,9 @@ declare(strict_types=1);
 namespace DmLab\AdminScim\Test\Unit\Doubles;
 
 use DmLab\AdminScim\Model\Discovery\EndpointUrlBuilder;
+use DmLab\AdminScim\Model\Filter\ExpressionParser;
+use DmLab\AdminScim\Model\Filter\SqlBuilder;
+use DmLab\AdminScim\Model\User\FilterParser;
 use DmLab\AdminScim\Model\Response\ScimResponse;
 use DmLab\AdminScim\Model\WriteLock;
 use Magento\Framework\App\Request\Http;
@@ -35,6 +38,69 @@ use Magento\User\Model\UserFactory;
  */
 trait InMemoryScimTrait
 {
+    /** @var array<string,array{0:array<string,mixed>,1:array<string,array<string,mixed>>}> compiled filters by key */
+    private array $inMemoryFilters = [];
+
+    /**
+     * A real user filter parser whose SQL step yields a key the in-memory collection evaluates.
+     */
+    private function createInMemoryFilterParser(): FilterParser
+    {
+        $builder = $this->createStub(SqlBuilder::class);
+        $builder->method('build')->willReturnCallback(function (array $node, array $attributes): string {
+            $key = 'in-memory-filter-' . count($this->inMemoryFilters);
+            $this->inMemoryFilters[$key] = [$node, $attributes];
+
+            return $key;
+        });
+
+        return new FilterParser(new ExpressionParser(), $builder);
+    }
+
+    /**
+     * Evaluate a filter tree against a stored row (string ops honour `caseExact`).
+     *
+     * @param array<string,mixed> $node
+     * @param array<string,array<string,mixed>> $attributes
+     * @param array<string,mixed> $row
+     */
+    private function rowMatchesFilter(array $node, array $attributes, array $row): bool
+    {
+        switch ($node['op']) {
+            case 'and':
+                return $this->rowMatchesFilter($node['left'], $attributes, $row)
+                    && $this->rowMatchesFilter($node['right'], $attributes, $row);
+            case 'or':
+                return $this->rowMatchesFilter($node['left'], $attributes, $row)
+                    || $this->rowMatchesFilter($node['right'], $attributes, $row);
+            case 'not':
+                return !$this->rowMatchesFilter($node['expr'], $attributes, $row);
+        }
+        $spec = $attributes[$node['attr']];
+        $column = static fn (string $sql): string => preg_replace('/^main_table\./', '', $sql);
+        $value = $row[$column($spec['column'])]
+            ?? (isset($spec['fallback']) ? ($row[$column($spec['fallback'])] ?? null) : null);
+        if ($node['op'] === 'pr') {
+            return $value !== null && $value !== '';
+        }
+        if ($spec['type'] === 'boolean') {
+            return ((bool)(int)$value === $node['value']) === ($node['op'] === 'eq');
+        }
+        $actual = (string)$value;
+        $expected = (string)$node['value'];
+        if (empty($spec['caseExact'])) {
+            $actual = mb_strtolower($actual);
+            $expected = mb_strtolower($expected);
+        }
+
+        return match ($node['op']) {
+            'eq' => $value !== null && $actual === $expected,
+            'ne' => $value === null || $actual !== $expected,
+            'co' => $value !== null && str_contains($actual, $expected),
+            'sw' => $value !== null && str_starts_with($actual, $expected),
+            'ew' => $value !== null && str_ends_with($actual, $expected),
+        };
+    }
     /**
      * A write lock that is always granted.
      */
@@ -157,6 +223,8 @@ trait InMemoryScimTrait
         $state = new class {
             /** @var array<int,array{0:string,1:mixed}> */
             public array $filters = [];
+            /** @var string[] in-memory filter keys passed to Select::where() */
+            public array $wheres = [];
             /** @var int|null */
             public ?int $limit = null;
             /** @var int */
@@ -176,6 +244,14 @@ trait InMemoryScimTrait
                 }));
             }
 
+            foreach ($state->wheres as $key) {
+                [$node, $attributes] = $this->inMemoryFilters[$key];
+                $rows = array_values(array_filter(
+                    $rows,
+                    fn (array $row): bool => $this->rowMatchesFilter($node, $attributes, $row)
+                ));
+            }
+
             return $rows;
         };
 
@@ -191,6 +267,11 @@ trait InMemoryScimTrait
 
         $select = $this->createStub(Select::class);
         $select->method('order')->willReturnCallback(fn ($spec): Select => $select);
+        $select->method('where')->willReturnCallback(function ($condition) use ($state, $select): Select {
+            $state->wheres[] = (string)$condition;
+
+            return $select;
+        });
         $select->method('limit')->willReturnCallback(
             function ($count = null, $offset = null) use ($state, $select): Select {
                 $state->limit = $count === null ? null : (int)$count;
@@ -236,7 +317,13 @@ trait InMemoryScimTrait
 
             return $raw;
         });
-        $raw->method('setHeader')->willReturnCallback(fn ($name, $value, $replace = false): Raw => $raw);
+        $raw->method('setHeader')->willReturnCallback(
+            function ($name, $value, $replace = false) use ($capture, $raw): Raw {
+                $capture->headers[$name] = (string)$value;
+
+                return $raw;
+            }
+        );
 
         $rawFactory = $this->createStub(RawFactory::class);
         $rawFactory->method('create')->willReturn($raw);

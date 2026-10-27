@@ -8,60 +8,57 @@ declare(strict_types=1);
 namespace DmLab\AdminScim\Model\User;
 
 use DmLab\AdminScim\Exception\ScimException;
+use DmLab\AdminScim\Model\Filter\ExpressionParser;
+use DmLab\AdminScim\Model\Filter\SqlBuilder;
 
 /**
- * Parses the narrow SCIM filter subset this server honours for `GET /Users`:
- * `userName eq "value"` and `externalId eq "value"` (RFC 7644 §3.4.2.2). Only
- * these two attributes with the `eq` operator are supported — everything else is
- * a `400 invalidFilter`, matching what {@see ServiceProviderConfig} advertises.
- * Returns the `admin_user` column and literal an IdP asked to match on.
+ * Compiles a `GET /Users` filter (RFC 7644 §3.4.2.2) into a condition on the admin_user
+ * collection (`main_table`). Filterable: `id`, `userName`, `externalId` (case-exact),
+ * `emails[.value]`, `name.givenName`, `name.familyName`, `active`, `meta.created`,
+ * `meta.lastModified`; anything else is `400 invalidFilter`.
  */
 class FilterParser
 {
-    /** SCIM attribute name (case-insensitive) → admin_user column. */
-    private const SUPPORTED = [
-        'username' => ScimUserMapper::USER_NAME_FIELD,
-        'externalid' => ScimUserMapper::EXTERNAL_ID_FIELD,
+    /** Filterable attribute path => {@see SqlBuilder} spec. */
+    private const ATTRIBUTES = [
+        'id' => ['column' => 'main_table.user_id', 'type' => 'integer'],
+        'username' => [
+            'column' => 'main_table.' . ScimUserMapper::USER_NAME_FIELD,
+            'fallback' => 'main_table.username',
+            'type' => 'string',
+        ],
+        'externalid' => [
+            'column' => 'main_table.' . ScimUserMapper::EXTERNAL_ID_FIELD,
+            'type' => 'string',
+            'caseExact' => true,
+        ],
+        'emails' => ['column' => 'main_table.email', 'type' => 'string'],
+        'emails.value' => ['column' => 'main_table.email', 'type' => 'string'],
+        'name.givenname' => ['column' => 'main_table.firstname', 'type' => 'string'],
+        'name.familyname' => ['column' => 'main_table.lastname', 'type' => 'string'],
+        'active' => ['column' => 'main_table.is_active', 'type' => 'boolean'],
+        'meta.created' => ['column' => 'main_table.created', 'type' => 'datetime'],
+        'meta.lastmodified' => ['column' => 'main_table.modified', 'type' => 'datetime'],
     ];
 
-    /** `<attr> eq "<value>"`, attribute/operator case-insensitive, value double-quoted. */
-    private const PATTERN = '/^\s*(\w+)\s+eq\s+"((?:[^"\\\\]|\\\\.)*)"\s*$/i';
-
     /**
-     * Resolve a filter expression to the column + value to match.
-     *
-     * @param string $filter raw `filter` query parameter
-     * @return array{0:string,1:string} `[admin_user column, value]`
-     * @throws ScimException 400 `invalidFilter` for an unsupported attribute,
-     *         operator, or malformed expression
+     * @param ExpressionParser $parser
+     * @param SqlBuilder $sqlBuilder
      */
-    public function parse(string $filter): array
-    {
-        if (preg_match(self::PATTERN, $filter, $m) !== 1) {
-            throw ScimException::badRequest(
-                'Only "userName eq" and "externalId eq" filters are supported.',
-                'invalidFilter'
-            );
-        }
-
-        $attribute = strtolower($m[1]);
-        if (!isset(self::SUPPORTED[$attribute])) {
-            throw ScimException::badRequest(
-                sprintf('Filtering on attribute "%s" is not supported.', $m[1]),
-                'invalidFilter'
-            );
-        }
-
-        return [self::SUPPORTED[$attribute], $this->unescape($m[2])];
+    public function __construct(
+        private readonly ExpressionParser $parser,
+        private readonly SqlBuilder $sqlBuilder
+    ) {
     }
 
     /**
-     * Unescape a SCIM double-quoted string literal (`\"` and `\\`).
+     * The SQL condition selecting the admins a filter matches.
      *
-     * @param string $value
+     * @param string $filter raw `filter` parameter
+     * @throws ScimException 400 `invalidFilter` for a malformed or unsupported filter
      */
-    private function unescape(string $value): string
+    public function parse(string $filter): string
     {
-        return preg_replace('/\\\\(["\\\\])/', '$1', $value) ?? $value;
+        return $this->sqlBuilder->build($this->parser->parse($filter, ScimUserMapper::SCHEMA_USER), self::ATTRIBUTES);
     }
 }

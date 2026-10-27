@@ -58,11 +58,18 @@ class ScimUserRepositoryTest extends TestCase
      * @param User[] $items value returned by getItems()
      * @param array<int,array{0:string,1:mixed}> $filters captured addFieldToFilter calls (by ref)
      * @param array<int,int> $limit captured getSelect()->limit args [count, offset] (by ref)
+     * @param string[] $wheres captured getSelect()->where conditions (by ref)
      * @return Collection&\PHPUnit\Framework\MockObject\Stub
      */
-    private function collection(int $size, array $items, array &$filters, array &$limit)
+    private function collection(int $size, array $items, array &$filters, array &$limit, array &$wheres = [])
     {
         $select = $this->createStub(Select::class);
+        $select->method('where')->willReturnCallback(
+            function ($condition) use (&$wheres, $select) {
+                $wheres[] = $condition;
+                return $select;
+            }
+        );
         $select->method('order')->willReturnCallback(fn ($spec) => $select);
         $select->method('limit')->willReturnCallback(
             function ($count, $offset) use (&$limit, $select) {
@@ -167,13 +174,15 @@ class ScimUserRepositoryTest extends TestCase
     {
         $filters = [];
         $limit = [];
-        $collection = $this->collection(1, [$this->createStub(User::class)], $filters, $limit);
+        $wheres = [];
+        $collection = $this->collection(1, [$this->createStub(User::class)], $filters, $limit, $wheres);
         $this->collectionFactory->method('create')->willReturn($collection);
-        $this->filterParser->method('parse')->willReturn(['username', 'jane']);
+        $this->filterParser->method('parse')->willReturn("(main_table.username = 'jane')");
 
         $this->repository->search('userName eq "jane"', 1, 10);
 
-        self::assertSame([[ScimUserMapper::MANAGED_FIELD, 1], ['username', 'jane']], $filters);
+        self::assertSame([[ScimUserMapper::MANAGED_FIELD, 1]], $filters);
+        self::assertSame(["(main_table.username = 'jane')"], $wheres);
     }
 
     public function testSearchTotalCountsManagedRowsOnly(): void
