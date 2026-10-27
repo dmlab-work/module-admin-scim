@@ -19,8 +19,9 @@ use Magento\Framework\DB\Adapter\DuplicateException;
  *
  * Write side of Group provisioning: create (POST), replace (PUT), PATCH
  * (add/replace/remove of displayName, externalId and members) and delete (DELETE).
- * `displayName` and `externalId` are unique — a collision is a SCIM `409`
- * `uniqueness` (RFC 7644 §3.3). Every membership change re-derives the affected
+ * `externalId` is unique — a collision is a SCIM `409` `uniqueness` (RFC 7644 §3.3);
+ * `displayName` is not (Entra allows duplicates), so a role mapping by name applies
+ * to every group carrying that name. Every membership change re-derives the affected
  * admins' ACL role via {@see GroupRoleSynchronizer} so assigning/unassigning a
  * group grants/revokes admin access with no login, but never strips the last usable
  * admin's role ({@see LastAdminGuard}). Every write runs under the
@@ -59,8 +60,7 @@ class GroupProvisioner
      *
      * @param array<string,mixed> $payload decoded SCIM Group resource
      * @return ScimGroup the created group (persisted, id populated)
-     * @throws ScimException 400 on invalid attributes, 409 on a displayName or
-     *         externalId that already exists
+     * @throws ScimException 400 on invalid attributes, 409 on an externalId that already exists
      */
     public function create(array $payload): ScimGroup
     {
@@ -78,7 +78,6 @@ class GroupProvisioner
         $externalId = $this->mapper->extractExternalId($payload);
         $memberIds = $this->mapper->extractMemberIds($payload);
 
-        $this->assertUnique('display_name', $displayName, 'A group with this displayName already exists.');
         if ($externalId !== null) {
             $this->assertUnique('external_id', $externalId, 'A group with this externalId already exists.');
         }
@@ -102,8 +101,8 @@ class GroupProvisioner
      * @param string $id the SCIM resource id (dmlab_scim_group.group_id)
      * @param array<string,mixed> $body decoded PatchOp resource
      * @return ScimGroup the updated group
-     * @throws ScimException 404 when absent, 400 on a malformed op, 409 on a
-     *         displayName or externalId already held by another group
+     * @throws ScimException 404 when absent, 400 on a malformed op, 409 on an
+     *         externalId already held by another group
      */
     public function patch(string $id, array $body): ScimGroup
     {
@@ -127,12 +126,6 @@ class GroupProvisioner
         // Only new ids: a stale pre-0.2.0 row naming an unmanaged admin must not block every PATCH.
         $this->assertMembersExist(array_diff($members, $before));
 
-        $this->assertUnique(
-            'display_name',
-            $group->displayName,
-            'A group with this displayName already exists.',
-            $groupId
-        );
         if ($group->externalId !== null && $group->externalId !== '') {
             $this->assertUnique(
                 'external_id',
@@ -158,7 +151,7 @@ class GroupProvisioner
      * @param array<string,mixed> $payload decoded SCIM Group resource
      * @return ScimGroup the replaced group
      * @throws ScimException 404 when absent, 400 on invalid attributes or unknown
-     *         members, 409 on a displayName or externalId held by another group
+     *         members, 409 on an externalId held by another group
      */
     public function replace(string $id, array $payload): ScimGroup
     {
@@ -180,7 +173,6 @@ class GroupProvisioner
         $externalId = $this->mapper->extractExternalId($payload);
         $memberIds = $this->mapper->extractMemberIds($payload);
 
-        $this->assertUnique('display_name', $displayName, 'A group with this displayName already exists.', $groupId);
         if ($externalId !== null) {
             $this->assertUnique(
                 'external_id',
@@ -251,7 +243,7 @@ class GroupProvisioner
      * @param int[] $members the group's full membership after the write
      * @param int[] $syncIds admins whose role must be re-derived
      * @return array<int,array<string,mixed>> committed `role.change` audit contexts
-     * @throws ScimException 409 on a duplicate displayName or externalId, 400 `mutability`
+     * @throws ScimException 409 on a duplicate externalId, 400 `mutability`
      *         when the role re-sync would leave no usable admin
      */
     private function write(ScimGroup $group, array $members, array $syncIds): array
@@ -269,7 +261,7 @@ class GroupProvisioner
             return $roleChanges;
         } catch (DuplicateException $e) {
             $connection->rollBack();
-            throw ScimException::conflict('A group with this displayName or externalId already exists.');
+            throw ScimException::conflict('A group with this externalId already exists.');
         } catch (\Throwable $e) {
             $connection->rollBack();
             throw $e;

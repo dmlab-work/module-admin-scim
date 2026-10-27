@@ -175,6 +175,30 @@ class GroupRoleLifecycleTest extends TestCase
         self::assertSame(404, $status);
     }
 
+    public function testGroupsSharingADisplayNameBothMapToTheRole(): void
+    {
+        $this->store->rows[2] = [
+            'user_id' => 2,
+            'username' => 'john',
+            'email' => 'john@example.com',
+            'is_active' => 1,
+            ScimUserMapper::MANAGED_FIELD => 1,
+        ];
+        foreach (['entra-a' => '1', 'entra-b' => '2'] as $externalId => $member) {
+            [$status] = $this->dispatch('POST', self::BASE, json_encode([
+                'schemas' => [ScimGroupMapper::SCHEMA_GROUP],
+                'displayName' => 'Admins',
+                'externalId' => $externalId,
+                'members' => [['value' => $member]],
+            ]));
+            self::assertSame(201, $status);
+        }
+
+        self::assertCount(2, $this->groups);
+        self::assertSame(5, (int)$this->store->rows[1]['role_id']);
+        self::assertSame(5, (int)$this->store->rows[2]['role_id']);
+    }
+
     public function testPutReplacingMembersMovesRole(): void
     {
         $this->store->rows[2] = [

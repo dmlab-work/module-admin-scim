@@ -113,7 +113,8 @@ class GroupProvisionerTest extends TestCase
     public function testCreatePersistsGroupMembersAndSyncsRoles(): void
     {
         $this->mapperReturns('Admins', 'grp-1', [5, 7]);
-        $this->groupResource->expects(self::exactly(2))->method('findConflictId')->willReturn(null);
+        $this->groupResource->expects(self::once())->method('findConflictId')
+            ->with('external_id', 'grp-1', null)->willReturn(null);
         $this->saveAssignsId(10);
 
         $this->memberResource->expects(self::once())->method('setMembers')->with(10, [5, 7]);
@@ -129,9 +130,8 @@ class GroupProvisionerTest extends TestCase
     public function testCreateSkipsExternalIdUniquenessWhenAbsent(): void
     {
         $this->mapperReturns('Admins', null, []);
-        // Only the displayName probe runs when there is no externalId.
-        $this->groupResource->expects(self::once())->method('findConflictId')
-            ->with('display_name', 'Admins', null)->willReturn(null);
+        // displayName is not unique, so no probe runs without an externalId.
+        $this->groupResource->expects(self::never())->method('findConflictId');
         $this->saveAssignsId(3);
         $this->memberResource->expects(self::once())->method('setMembers')->with(3, []);
         $this->roleSynchronizer->expects(self::once())->method('syncUsers')->with([]);
@@ -158,9 +158,9 @@ class GroupProvisionerTest extends TestCase
         }
     }
 
-    public function testCreateThrowsConflictOnDuplicateDisplayName(): void
+    public function testCreateThrowsConflictOnDuplicateExternalId(): void
     {
-        $this->mapperReturns('Admins', null, []);
+        $this->mapperReturns('Admins', 'grp-1', []);
         $this->groupResource->method('findConflictId')->willReturn(99);
         $this->groupResource->expects(self::never())->method('save');
         $this->memberResource->expects(self::never())->method('setMembers');
@@ -173,6 +173,18 @@ class GroupProvisionerTest extends TestCase
             self::assertSame(409, $e->getHttpStatus());
             self::assertSame('uniqueness', $e->getScimType());
         }
+    }
+
+    public function testDuplicateDisplayNameIsAllowed(): void
+    {
+        $this->mapperReturns('Admins', 'grp-2', []);
+        $this->groupResource->expects(self::once())->method('findConflictId')
+            ->with('external_id', 'grp-2', null)->willReturn(null);
+        $this->saveAssignsId(11);
+        $this->memberResource->expects(self::once())->method('setMembers')->with(11, []);
+        $this->roleSynchronizer->expects(self::once())->method('syncUsers')->willReturn([]);
+
+        self::assertSame(11, $this->provisioner->create(['displayName' => 'Admins'])->groupId);
     }
 
     public function testPatchAppliesOpsPersistsAndSyncsAffectedUnion(): void
@@ -209,7 +221,7 @@ class GroupProvisionerTest extends TestCase
                 $members = [5, 6, 8];
             }
         );
-        $this->groupResource->expects(self::once())->method('findConflictId')->willReturn(null);
+        $this->groupResource->expects(self::never())->method('findConflictId');
         $this->memberResource->expects(self::once())->method('findMissingUserIds')
             ->with([2 => 8])->willReturn([]);
         $this->memberResource->expects(self::once())->method('setMembers')->with(10, [5, 6, 8]);
@@ -335,16 +347,16 @@ class GroupProvisionerTest extends TestCase
         $provisioner->delete('10');
     }
 
-    public function testPatchRechecksDisplayNameUniqueness(): void
+    public function testPatchRechecksExternalIdUniqueness(): void
     {
-        $group = new ScimGroup(10, 'Renamed');
+        $group = new ScimGroup(10, 'Renamed', 'grp-9');
         $this->repository->method('getById')->willReturn($group);
         $this->memberResource->expects(self::once())->method('getUserIds')->willReturn([]);
         $this->memberResource->expects(self::never())->method('setMembers');
         $this->patcher->method('apply');
-        // The new displayName is held by another group (id excluded = 10).
+        // The externalId is held by another group (id excluded = 10).
         $this->groupResource->method('findConflictId')
-            ->with('display_name', 'Renamed', 10)->willReturn(42);
+            ->with('external_id', 'grp-9', 10)->willReturn(42);
         $this->groupResource->expects(self::never())->method('save');
         $this->roleSynchronizer->expects(self::never())->method('syncUsers');
 
@@ -375,7 +387,7 @@ class GroupProvisionerTest extends TestCase
         $this->mapperReturns('Ops', 'grp-2', [5, 8]);
         $this->memberResource->method('getUserIds')->with(10)->willReturn([5, 6]);
         $this->memberResource->method('findMissingUserIds')->willReturn([]);
-        $this->groupResource->expects(self::exactly(2))->method('findConflictId')
+        $this->groupResource->expects(self::once())->method('findConflictId')
             ->willReturnCallback(static function (string $field, string $value, ?int $excludeId): ?int {
                 self::assertSame(10, $excludeId);
 
@@ -400,8 +412,7 @@ class GroupProvisionerTest extends TestCase
         $this->mapperReturns('Admins', null, []);
         $this->memberResource->method('getUserIds')->willReturn([]);
         $this->memberResource->method('findMissingUserIds')->willReturn([]);
-        $this->groupResource->expects(self::once())->method('findConflictId')
-            ->with('display_name', 'Admins', 10)->willReturn(null);
+        $this->groupResource->expects(self::never())->method('findConflictId');
         $this->groupResource->expects(self::once())->method('save');
         $this->memberResource->expects(self::once())->method('setMembers')->with(10, []);
         $this->roleSynchronizer->expects(self::once())->method('syncUsers')->with([]);
@@ -409,11 +420,11 @@ class GroupProvisionerTest extends TestCase
         self::assertNull($this->provisioner->replace('10', ['displayName' => 'Admins'])->externalId);
     }
 
-    public function testReplaceThrowsConflictOnDisplayNameClash(): void
+    public function testReplaceThrowsConflictOnExternalIdClash(): void
     {
         $this->repository->method('getById')->willReturn(new ScimGroup(10, 'Admins'));
-        $this->mapperReturns('Ops', null, []);
-        $this->groupResource->method('findConflictId')->with('display_name', 'Ops', 10)->willReturn(42);
+        $this->mapperReturns('Ops', 'grp-2', []);
+        $this->groupResource->method('findConflictId')->with('external_id', 'grp-2', 10)->willReturn(42);
         $this->groupResource->expects(self::never())->method('save');
         $this->memberResource->expects(self::never())->method('setMembers');
         $this->roleSynchronizer->expects(self::never())->method('syncUsers');
@@ -562,7 +573,7 @@ class GroupProvisionerTest extends TestCase
     public function testCreateLogsGroupCreateWithAddedMembers(): void
     {
         $this->mapperReturns('Admins', null, [5, 7]);
-        $this->groupResource->expects(self::once())->method('findConflictId')->willReturn(null);
+        $this->groupResource->expects(self::never())->method('findConflictId');
         $this->memberResource->method('findMissingUserIds')->willReturn([]);
         $this->memberResource->expects(self::once())->method('setMembers')->with(10, [5, 7]);
         $this->roleSynchronizer->expects(self::once())->method('syncUsers')->with([5, 7]);

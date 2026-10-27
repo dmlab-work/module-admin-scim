@@ -369,7 +369,7 @@ class GroupsTest extends TestCase
         $this->request->method('getContent')->willReturn('{"displayName":"Admins"}');
 
         $this->provisioner->expects(self::once())->method('create')
-            ->willThrowException(ScimException::conflict('A group with this displayName already exists.'));
+            ->willThrowException(ScimException::conflict('A group with this externalId already exists.'));
         $this->provisioner->expects(self::never())->method('patch');
         $this->repository->expects(self::never())->method('getById');
         $this->response->expects(self::once())->method('error')

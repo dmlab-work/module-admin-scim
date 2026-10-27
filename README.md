@@ -68,7 +68,8 @@ schema (`urn:ietf:params:scim:api:messages:2.0:Error`) with the correct status.
    configure it to send `Authorization: Bearer <token>`.
 6. **Group → Role Map** — one `displayName=role_id` per line, mapping a SCIM group
    to a Magento admin role id (`#` lines ignored). A provisioned member gets the
-   first matching role (admins hold a single role).
+   first matching role (admins hold a single role). `displayName` is not unique: a
+   rule applies to every group with that name.
 7. **Default Role Id** — role assigned when an admin's groups match no rule,
    including admins created with no groups (applied at user create/update). Leave
    empty to deny (no role).

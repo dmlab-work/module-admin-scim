@@ -28,8 +28,8 @@
     </table>
 
     <!-- A provisioned SCIM Group. Its `group_id` is the SCIM resource id; the
-         `display_name` is what maps to a Magento ACL role via the configured
-         group→role rules. Groups exist only to carry membership and drive role
+         `display_name` (not unique: Entra allows duplicates) is what maps to a
+         Magento ACL role via the configured group→role rules. Groups exist only to carry membership and drive role
          assignment — they are not Magento entities of their own. -->
     <table name="dmlab_scim_group" resource="default" engine="innodb"
            comment="DmLab SCIM Groups">
@@ -41,9 +41,6 @@
                 comment="IdP externalId"/>
         <constraint xsi:type="primary" referenceId="PRIMARY">
             <column name="group_id"/>
-        </constraint>
-        <constraint xsi:type="unique" referenceId="DMLAB_SCIM_GROUP_DISPLAY_NAME">
-            <column name="display_name"/>
         </constraint>
         <constraint xsi:type="unique" referenceId="DMLAB_SCIM_GROUP_EXTERNAL_ID">
             <column name="external_id"/>

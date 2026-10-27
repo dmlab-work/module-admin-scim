@@ -81,7 +81,7 @@ class GroupResource
     /**
      * The id of another group holding `$value` in `$field`, or null when free.
      *
-     * @param string $field group column (`display_name` or `external_id`)
+     * @param string $field group column, e.g. `external_id`
      * @param string $value
      * @param int|null $excludeId group id to ignore (the row being updated)
      */
