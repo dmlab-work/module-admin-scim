@@ -17,6 +17,7 @@ use DmLab\AdminScim\Model\Group\ScimGroup;
 use DmLab\AdminScim\Model\Group\ScimGroupMapper;
 use DmLab\AdminScim\Model\Group\ScimGroupRepository;
 use DmLab\AdminScim\Model\Normalization\RequestNormalizerChain;
+use DmLab\AdminScim\Model\Response\AttributeProjector;
 use DmLab\AdminScim\Model\Response\ListResponseBuilder;
 use DmLab\AdminScim\Model\Response\ScimResponse;
 use Magento\Framework\App\Request\Http;
@@ -78,7 +79,8 @@ class GroupsTest extends TestCase
             $this->memberResource,
             new ListResponseBuilder(),
             new Json(),
-            new RequestNormalizerChain($this->createStub(Config::class))
+            new RequestNormalizerChain($this->createStub(Config::class)),
+            new AttributeProjector()
         );
     }
 
@@ -224,6 +226,47 @@ class GroupsTest extends TestCase
         self::assertSame(5, $captured['totalResults']);
         self::assertSame(2, $captured['itemsPerPage']);
         self::assertSame([['id' => '1'], ['id' => '2']], $captured['Resources']);
+    }
+
+    public function testListWithMembersExcludedSkipsMemberQueries(): void
+    {
+        $memberResource = $this->createMock(MemberResource::class);
+        $memberResource->expects(self::never())->method('getMembers');
+        $controller = new Groups(
+            $this->request,
+            $this->authenticator,
+            $this->response,
+            $this->logger,
+            $this->provisioner,
+            $this->repository,
+            $this->mapper,
+            $memberResource,
+            new ListResponseBuilder(),
+            new Json(),
+            new RequestNormalizerChain($this->createStub(Config::class)),
+            new AttributeProjector()
+        );
+        $raw = $this->createStub(Raw::class);
+        $this->request->method('getMethod')->willReturn('GET');
+        $this->request->method('getPathInfo')->willReturn('/admin-scim/v2/Groups');
+        $this->request->method('getParam')->willReturnMap([
+            ['excludedAttributes', null, 'members'],
+        ]);
+        $this->provisioner->expects(self::never())->method('create');
+        $this->repository->expects(self::once())->method('search')
+            ->willReturn(['groups' => [new ScimGroup(1, 'A')], 'total' => 1]);
+        $this->mapper->method('toResource')->willReturn(['id' => '1', 'displayName' => 'A', 'members' => []]);
+        $captured = null;
+        $this->response->expects(self::once())->method('json')
+            ->willReturnCallback(function ($body) use (&$captured, $raw) {
+                $captured = $body;
+                return $raw;
+            });
+
+        $this->logger->expects(self::never())->method('critical');
+
+        self::assertSame($raw, $controller->execute());
+        self::assertSame([['id' => '1', 'displayName' => 'A']], $captured['Resources']);
     }
 
     public function testListPassesFilterAndPaginationToRepository(): void

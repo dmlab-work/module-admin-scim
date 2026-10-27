@@ -18,6 +18,7 @@ use DmLab\AdminScim\Model\Group\ScimGroup;
 use DmLab\AdminScim\Model\Group\ScimGroupMapper;
 use DmLab\AdminScim\Model\Group\ScimGroupRepository;
 use DmLab\AdminScim\Model\Normalization\RequestNormalizerChain;
+use DmLab\AdminScim\Model\Response\AttributeProjector;
 use DmLab\AdminScim\Model\Response\ListResponseBuilder;
 use DmLab\AdminScim\Model\Response\ScimResponse;
 use Magento\Framework\App\Request\Http;
@@ -31,7 +32,9 @@ use Psr\Log\LoggerInterface;
  * Serves POST (create), GET (read one by `id`, or list with the supported filter
  * subset + pagination), PUT (full replace), PATCH (add/replace/remove of attributes
  * and members) and DELETE (204). A member change re-derives the affected admins'
- * ACL role (see {@see GroupProvisioner}). Unsupported verbs answer `501 Not Implemented`.
+ * ACL role (see {@see GroupProvisioner}). Returned resources honour `attributes` /
+ * `excludedAttributes`; members are not loaded when not returned. Unsupported verbs
+ * answer `501 Not Implemented`.
  */
 class Groups extends AbstractScim
 {
@@ -50,6 +53,7 @@ class Groups extends AbstractScim
      * @param ListResponseBuilder $listBuilder
      * @param Json $serializer
      * @param RequestNormalizerChain $normalizerChain
+     * @param AttributeProjector $projector
      */
     public function __construct(
         Http $request,
@@ -62,7 +66,8 @@ class Groups extends AbstractScim
         private readonly MemberResource $memberResource,
         private readonly ListResponseBuilder $listBuilder,
         private readonly Json $serializer,
-        private readonly RequestNormalizerChain $normalizerChain
+        private readonly RequestNormalizerChain $normalizerChain,
+        private readonly AttributeProjector $projector
     ) {
         parent::__construct($request, $authenticator, $response, $logger);
     }
@@ -156,16 +161,27 @@ class Groups extends AbstractScim
     }
 
     /**
-     * Render a group as a SCIM resource, loading its current members.
+     * A group as a SCIM resource, projected per the request's `attributes` / `excludedAttributes`.
+     *
+     * Members cost a query per group, so they are loaded only when returned.
      *
      * @param ScimGroup $group
      * @return array<string,mixed>
      */
     private function resource(ScimGroup $group): array
     {
-        $members = $this->memberResource->getMembers((int)$group->groupId);
+        $attributes = $this->stringParam('attributes');
+        $excluded = $this->stringParam('excludedAttributes');
+        $members = $this->projector->isReturned('members', ScimGroupMapper::SCHEMA_GROUP, $attributes, $excluded)
+            ? $this->memberResource->getMembers((int)$group->groupId)
+            : [];
 
-        return $this->mapper->toResource($group, $members);
+        return $this->projector->project(
+            $this->mapper->toResource($group, $members),
+            ScimGroupMapper::SCHEMA_GROUP,
+            $attributes,
+            $excluded
+        );
     }
 
     /**

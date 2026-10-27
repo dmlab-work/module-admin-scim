@@ -21,6 +21,7 @@ use DmLab\AdminScim\Model\Group\ScimGroupMapper;
 use DmLab\AdminScim\Model\Group\ScimGroupPatcher;
 use DmLab\AdminScim\Model\Group\ScimGroupRepository;
 use DmLab\AdminScim\Model\Normalization\RequestNormalizerChain;
+use DmLab\AdminScim\Model\Response\AttributeProjector;
 use DmLab\AdminScim\Model\Response\ListResponseBuilder;
 use DmLab\AdminScim\Model\User\LastAdminGuard;
 use DmLab\AdminScim\Model\User\ScimUserMapper;
@@ -460,7 +461,8 @@ class GroupRoleLifecycleTest extends TestCase
             $this->memberResource,
             new ListResponseBuilder(),
             new Json(),
-            new RequestNormalizerChain($this->createStub(Config::class))
+            new RequestNormalizerChain($this->createStub(Config::class)),
+            new AttributeProjector()
         );
         $controller->execute();
 

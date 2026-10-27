@@ -13,6 +13,7 @@ use DmLab\AdminScim\Exception\ScimException;
 use DmLab\AdminScim\Model\Auth\BearerTokenAuthenticator;
 use DmLab\AdminScim\Model\Discovery\DiscoveryProvider;
 use DmLab\AdminScim\Model\Normalization\RequestNormalizerChain;
+use DmLab\AdminScim\Model\Response\AttributeProjector;
 use DmLab\AdminScim\Model\Response\ListResponseBuilder;
 use DmLab\AdminScim\Model\Response\ScimResponse;
 use DmLab\AdminScim\Model\User\ScimUserMapper;
@@ -21,6 +22,7 @@ use DmLab\AdminScim\Model\User\UserProvisioner;
 use Magento\Framework\App\Request\Http;
 use Magento\Framework\Controller\ResultInterface;
 use Magento\Framework\Serialize\Serializer\Json;
+use Magento\User\Model\User;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -28,7 +30,8 @@ use Psr\Log\LoggerInterface;
  *
  * Serves POST (create), GET (read one by `id`, or list with the supported
  * filter subset + pagination), PUT (full replace), PATCH (partial ops incl.
- * `active` deprovisioning) and DELETE (hard delete, 204). Unsupported verbs answer `501 Not Implemented`; a
+ * `active` deprovisioning) and DELETE (hard delete, 204). Returned resources honour
+ * `attributes` / `excludedAttributes`. Unsupported verbs answer `501 Not Implemented`; a
  * single action class serves every verb because Magento routes the whole
  * `Users` path here.
  */
@@ -48,6 +51,7 @@ class Users extends AbstractScim
      * @param ListResponseBuilder $listBuilder
      * @param Json $serializer
      * @param RequestNormalizerChain $normalizerChain
+     * @param AttributeProjector $projector
      */
     public function __construct(
         Http $request,
@@ -59,7 +63,8 @@ class Users extends AbstractScim
         private readonly ScimUserMapper $mapper,
         private readonly ListResponseBuilder $listBuilder,
         private readonly Json $serializer,
-        private readonly RequestNormalizerChain $normalizerChain
+        private readonly RequestNormalizerChain $normalizerChain,
+        private readonly AttributeProjector $projector
     ) {
         parent::__construct($request, $authenticator, $response, $logger);
     }
@@ -88,7 +93,7 @@ class Users extends AbstractScim
     {
         $user = $this->provisioner->create($this->parseBody());
 
-        return $this->response->json($this->mapper->toResource($user), 201);
+        return $this->response->json($this->render($user), 201);
     }
 
     /**
@@ -98,7 +103,7 @@ class Users extends AbstractScim
     {
         $user = $this->provisioner->replace($this->requireResourceId(), $this->parseBody());
 
-        return $this->response->json($this->mapper->toResource($user));
+        return $this->response->json($this->render($user));
     }
 
     /**
@@ -108,7 +113,7 @@ class Users extends AbstractScim
     {
         $user = $this->provisioner->patch($this->requireResourceId(), $this->parseBody());
 
-        return $this->response->json($this->mapper->toResource($user));
+        return $this->response->json($this->render($user));
     }
 
     /**
@@ -128,7 +133,7 @@ class Users extends AbstractScim
     {
         $id = $this->resourceId();
         if ($id !== null) {
-            return $this->response->json($this->mapper->toResource($this->repository->getById($id)));
+            return $this->response->json($this->render($this->repository->getById($id)));
         }
 
         return $this->listUsers();
@@ -144,13 +149,26 @@ class Users extends AbstractScim
         $count = $this->intParam('count', self::DEFAULT_COUNT, 0, DiscoveryProvider::FILTER_MAX_RESULTS);
 
         $result = $this->repository->search($filter === '' ? null : $filter, $startIndex, $count);
-        $resources = array_map(
-            fn ($user): array => $this->mapper->toResource($user),
-            $result['users']
-        );
+        $resources = array_map(fn (User $user): array => $this->render($user), $result['users']);
 
         return $this->response->json(
             $this->listBuilder->build($resources, $result['total'], $startIndex, count($resources))
+        );
+    }
+
+    /**
+     * A user as a SCIM resource, projected per the request's `attributes` / `excludedAttributes`.
+     *
+     * @param User $user
+     * @return array<string,mixed>
+     */
+    private function render(User $user): array
+    {
+        return $this->projector->project(
+            $this->mapper->toResource($user),
+            ScimUserMapper::SCHEMA_USER,
+            $this->stringParam('attributes'),
+            $this->stringParam('excludedAttributes')
         );
     }
 

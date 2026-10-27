@@ -85,6 +85,7 @@ Advertised honestly in `ServiceProviderConfig`:
 | PATCH | ✅ |
 | Filter (`userName eq`, `externalId eq`, `displayName eq`) | ✅ (max 200 results) |
 | Pagination (`startIndex`, `count`) | ✅ |
+| `attributes` / `excludedAttributes` | ✅ |
 | Bulk | ❌ |
 | Sort | ❌ |
 | ETag | ❌ |

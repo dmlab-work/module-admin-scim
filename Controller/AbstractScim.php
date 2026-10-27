@@ -139,6 +139,18 @@ abstract class AbstractScim implements
     }
 
     /**
+     * A string query parameter, or null when absent or not a string.
+     *
+     * @param string $name
+     */
+    protected function stringParam(string $name): ?string
+    {
+        $value = $this->request->getParam($name);
+
+        return is_string($value) ? $value : null;
+    }
+
+    /**
      * Handle the authenticated request and produce a SCIM result.
      *
      * @return ResultInterface

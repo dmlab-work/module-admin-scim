@@ -15,6 +15,7 @@ use DmLab\AdminScim\Model\Group\GroupRoleSynchronizer;
 use DmLab\AdminScim\Model\Group\MemberResource;
 use DmLab\AdminScim\Model\Mapping\MappingEngine;
 use DmLab\AdminScim\Model\Normalization\RequestNormalizerChain;
+use DmLab\AdminScim\Model\Response\AttributeProjector;
 use DmLab\AdminScim\Model\Response\ListResponseBuilder;
 use DmLab\AdminScim\Model\User\FilterParser;
 use DmLab\AdminScim\Model\User\LastAdminGuard;
@@ -139,6 +140,10 @@ class UserLifecycleTest extends TestCase
         self::assertSame(200, $status);
         self::assertSame('jane.doe@example.com', $read['userName']);
         self::assertSame('okta-1', $read['externalId']);
+
+        // `attributes` narrows the representation; id and schemas are always returned.
+        [, $narrow] = $this->dispatch('GET', self::BASE . '/' . $id, '', ['attributes' => 'userName']);
+        self::assertSame(['schemas', 'id', 'userName'], array_keys($narrow));
 
         // 3. List with the supported filter subset — matches the created user.
         [$status, $list] = $this->dispatch('GET', self::BASE, '', ['filter' => 'userName eq "jane.doe@example.com"']);
@@ -365,7 +370,8 @@ class UserLifecycleTest extends TestCase
             $this->mapper,
             new ListResponseBuilder(),
             new Json(),
-            new RequestNormalizerChain($this->createStub(Config::class))
+            new RequestNormalizerChain($this->createStub(Config::class)),
+            new AttributeProjector()
         );
         $controller->execute();
 
