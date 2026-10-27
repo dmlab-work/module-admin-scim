@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.3
+
+- SCIM deactivation and delete revoke the admin's REST API tokens (core does this only in a `User::save()` plugin, which the SCIM write path skips); requires `Magento_Integration`.
+
 ## 0.2.2
 
 - SCIM deactivation (`active=false` via PUT/PATCH) ends the admin's open backend sessions; requires `Magento_Security`.
