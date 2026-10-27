@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.2
+
+- SCIM deactivation (`active=false` via PUT/PATCH) ends the admin's open backend sessions; requires `Magento_Security`.
+- A deactivate, delete or role strip that would leave no active admin holding a role is refused with `400 mutability`.
+- Group `displayName` is no longer unique (Entra allows duplicates); a Group → Role rule applies to every group with that name.
+- `userName` up to 255 chars is stored and returned as sent (`admin_user.dmlab_scim_user_name`, backfilled on upgrade); logins over 40 chars become a prefix plus a hash.
+- `attributes` / `excludedAttributes` are honoured; group members are not loaded when excluded.
+- Filters support `eq ne co sw ew gt ge lt le pr`, `and`/`or`/`not` and value paths; `externalId` matching is case-exact.
+- `POST /Users/.search` and `/Groups/.search`; `/Me`, `/Bulk` and root `/.search` answer `501`, unknown SCIM paths a JSON `404`.
+- `201` responses carry `Location`; resources carry `meta.created` / `meta.lastModified` (new `dmlab_scim_group.created_at` / `updated_at`).
+- `externalId` / `displayName` over 255 chars are `400 invalidValue`; URN-qualified paths are accepted in Group PATCH and filters.
+- New **Request Limit** setting: 1200 requests per minute per token by default, then `429` with `Retry-After`; `0` disables it.
+- Bearer tokens are compared as SHA-256 digests.
+- Upgrade: run `setup:upgrade` (schema change + data patch).
+
 ## 0.2.1
 
 - Fixed: audit log no longer duplicated into `system.log` / `debug.log`.
