@@ -9,6 +9,7 @@ namespace DmLab\AdminScim\Model\Group;
 
 use DmLab\AdminScim\Exception\ScimException;
 use DmLab\AdminScim\Model\Audit\AuditLogger;
+use DmLab\AdminScim\Model\User\LastAdminGuard;
 use DmLab\AdminScim\Model\WriteLock;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Adapter\DuplicateException;
@@ -21,7 +22,8 @@ use Magento\Framework\DB\Adapter\DuplicateException;
  * `displayName` and `externalId` are unique — a collision is a SCIM `409`
  * `uniqueness` (RFC 7644 §3.3). Every membership change re-derives the affected
  * admins' ACL role via {@see GroupRoleSynchronizer} so assigning/unassigning a
- * group grants/revokes admin access with no login. Every write runs under the
+ * group grants/revokes admin access with no login, but never strips the last usable
+ * admin's role ({@see LastAdminGuard}). Every write runs under the
  * {@see WriteLock} and is audit-logged after it commits.
  */
 class GroupProvisioner
@@ -36,6 +38,7 @@ class GroupProvisioner
      * @param ResourceConnection $resource
      * @param AuditLogger $auditLogger
      * @param WriteLock $writeLock
+     * @param LastAdminGuard $lastAdminGuard
      */
     public function __construct(
         private readonly ScimGroupMapper $mapper,
@@ -46,7 +49,8 @@ class GroupProvisioner
         private readonly GroupRoleSynchronizer $roleSynchronizer,
         private readonly ResourceConnection $resource,
         private readonly AuditLogger $auditLogger,
-        private readonly WriteLock $writeLock
+        private readonly WriteLock $writeLock,
+        private readonly LastAdminGuard $lastAdminGuard
     ) {
     }
 
@@ -223,9 +227,11 @@ class GroupProvisioner
         $connection = $this->resource->getConnection();
         $connection->beginTransaction();
         try {
+            $usableBefore = $this->lastAdminGuard->countUsable();
             $this->memberResource->removeAllForGroup($groupId);
             $this->groupResource->delete($groupId);
             $roleChanges = $this->roleSynchronizer->syncUsers($before);
+            $this->lastAdminGuard->assertUsableAdminRemains($usableBefore);
             $connection->commit();
         } catch (\Throwable $e) {
             $connection->rollBack();
@@ -245,16 +251,19 @@ class GroupProvisioner
      * @param int[] $members the group's full membership after the write
      * @param int[] $syncIds admins whose role must be re-derived
      * @return array<int,array<string,mixed>> committed `role.change` audit contexts
-     * @throws ScimException 409 on a duplicate displayName or externalId
+     * @throws ScimException 409 on a duplicate displayName or externalId, 400 `mutability`
+     *         when the role re-sync would leave no usable admin
      */
     private function write(ScimGroup $group, array $members, array $syncIds): array
     {
         $connection = $this->resource->getConnection();
         $connection->beginTransaction();
         try {
+            $usableBefore = $this->lastAdminGuard->countUsable();
             $this->groupResource->save($group);
             $this->memberResource->setMembers((int)$group->groupId, $members);
             $roleChanges = $this->roleSynchronizer->syncUsers($syncIds);
+            $this->lastAdminGuard->assertUsableAdminRemains($usableBefore);
             $connection->commit();
 
             return $roleChanges;

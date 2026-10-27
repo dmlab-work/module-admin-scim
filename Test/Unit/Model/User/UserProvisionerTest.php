@@ -11,6 +11,7 @@ use DmLab\AdminScim\Exception\ScimException;
 use DmLab\AdminScim\Model\Audit\AuditLogger;
 use DmLab\AdminScim\Model\Group\GroupRoleSynchronizer;
 use DmLab\AdminScim\Model\User\FilterParser;
+use DmLab\AdminScim\Model\User\LastAdminGuard;
 use DmLab\AdminScim\Model\User\ScimUserMapper;
 use DmLab\AdminScim\Model\User\ScimUserPatcher;
 use DmLab\AdminScim\Model\User\ScimUserRepository;
@@ -62,6 +63,9 @@ class UserProvisionerTest extends TestCase
     /** @var AdminSessionInfoResource&\PHPUnit\Framework\MockObject\Stub */
     private $sessionResource;
 
+    /** @var LastAdminGuard&\PHPUnit\Framework\MockObject\Stub */
+    private $guard;
+
     /** @var UserProvisioner */
     private UserProvisioner $provisioner;
 
@@ -78,6 +82,7 @@ class UserProvisionerTest extends TestCase
         $this->synchronizer = $this->createStub(GroupRoleSynchronizer::class);
         $this->auditLogger = $this->createStub(AuditLogger::class);
         $this->sessionResource = $this->createStub(AdminSessionInfoResource::class);
+        $this->guard = $this->createStub(LastAdminGuard::class);
 
         $this->provisioner = $this->provisionerWith($this->synchronizer);
     }
@@ -103,7 +108,8 @@ class UserProvisionerTest extends TestCase
             $synchronizer,
             $auditLogger ?? $this->auditLogger,
             $this->writeLock(),
-            $this->sessionResource
+            $this->sessionResource,
+            $this->guard
         );
     }
 
@@ -511,7 +517,8 @@ class UserProvisionerTest extends TestCase
             $this->synchronizer,
             $this->auditLogger,
             $this->writeLock(),
-            $this->sessionResource
+            $this->sessionResource,
+            $this->guard
         );
     }
 
@@ -892,6 +899,65 @@ class UserProvisionerTest extends TestCase
         self::assertSame(['begin', 'logout', 'commit'], $calls);
     }
 
+    public function testUpdateLeavingNoUsableAdminRollsBack(): void
+    {
+        $data = ['username' => 'jane.doe', 'email' => 'jane@example.com', 'is_active' => '1'];
+        $this->repository->method('getById')->willReturn($this->userWithData(42, $data));
+        $this->patcher->method('apply')->willReturnCallback(
+            static function () use (&$data): void {
+                $data['is_active'] = 0;
+            }
+        );
+        $this->collectionFactory->expects(self::atLeastOnce())->method('create')
+            ->willReturn($this->collectionReturning($this->emptyUser()));
+        $this->userFactory->expects(self::never())->method('create');
+        $this->userResource->expects(self::once())->method('save');
+        $this->userResource->expects(self::once())->method('rollBack');
+        $this->userResource->expects(self::never())->method('commit');
+        $this->guard = $this->createMock(LastAdminGuard::class);
+        $this->guard->expects(self::once())->method('countUsable')->with()->willReturn(1);
+        $this->guard->expects(self::once())->method('assertUsableAdminRemains')->with(1)
+            ->willThrowException(ScimException::badRequest('last admin', 'mutability'));
+        $provisioner = $this->provisionerWith($this->synchronizer, $this->expectNoAudit());
+
+        try {
+            $provisioner->patch('42', ['Operations' => [['op' => 'replace', 'path' => 'active', 'value' => false]]]);
+            self::fail('Expected ScimException');
+        } catch (ScimException $e) {
+            self::assertSame(400, $e->getHttpStatus());
+            self::assertSame('mutability', $e->getScimType());
+        }
+    }
+
+    public function testCreateSkipsTheLastAdminCount(): void
+    {
+        $this->mapperReturns(null);
+        $this->collectionFactory->expects(self::atLeastOnce())->method('create')
+            ->willReturn($this->collectionReturning($this->emptyUser()));
+        $this->userFactory->expects(self::once())->method('create')->willReturn($this->existingUser(42));
+        $this->userResource->expects(self::once())->method('save');
+        $this->guard = $this->createMock(LastAdminGuard::class);
+        $this->guard->expects(self::never())->method('countUsable');
+        $this->guard->expects(self::once())->method('assertUsableAdminRemains')->with(0);
+
+        $this->provisionerWith($this->synchronizer)->create(['userName' => 'jane.doe']);
+    }
+
+    public function testDeleteOfLastUsableAdminIsRejected(): void
+    {
+        $this->repository->method('getById')->willReturn($this->existingUser(42));
+        $this->collectionFactory->expects(self::never())->method('create');
+        $this->userFactory->expects(self::never())->method('create');
+        $this->userResource->expects(self::never())->method('delete');
+        $this->guard = $this->createMock(LastAdminGuard::class);
+        $this->guard->expects(self::once())->method('countUsable')->with()->willReturn(1);
+        $this->guard->expects(self::once())->method('assertUsableAdminRemains')->with(1, 42)
+            ->willThrowException(ScimException::badRequest('last admin', 'mutability'));
+
+        $this->expectException(ScimException::class);
+        $this->provisionerWith($this->synchronizer)->delete('42');
+    }
+
     public function testDeleteLogsUserDelete(): void
     {
         $data = ['username' => 'jane.doe'];
@@ -1058,7 +1124,8 @@ class UserProvisionerTest extends TestCase
             $this->synchronizer,
             $this->auditLogger,
             new WriteLock($lockManager),
-            $this->sessionResource
+            $this->sessionResource,
+            $this->guard
         );
 
         $this->expectException(ScimException::class);

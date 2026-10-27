@@ -22,6 +22,7 @@ use DmLab\AdminScim\Model\Group\ScimGroupPatcher;
 use DmLab\AdminScim\Model\Group\ScimGroupRepository;
 use DmLab\AdminScim\Model\Normalization\RequestNormalizerChain;
 use DmLab\AdminScim\Model\Response\ListResponseBuilder;
+use DmLab\AdminScim\Model\User\LastAdminGuard;
 use DmLab\AdminScim\Model\User\ScimUserMapper;
 use DmLab\AdminScim\Test\Unit\Doubles\AdminUserStore;
 use DmLab\AdminScim\Test\Unit\Doubles\InMemoryScimTrait;
@@ -114,7 +115,8 @@ class GroupRoleLifecycleTest extends TestCase
             $synchronizer,
             $this->createResourceConnection(),
             $this->createStub(AuditLogger::class),
-            $this->createWriteLock()
+            $this->createWriteLock(),
+            $this->createStub(LastAdminGuard::class)
         );
     }
 

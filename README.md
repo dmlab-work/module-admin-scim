@@ -23,6 +23,8 @@ flagged on upgrade — check that no local admin got flagged that way).
   never accepted as group members and never touched by group→role sync.
 - Creating a user whose `userName` belongs to a local admin returns `409` — no
   adoption.
+- A deactivate, delete or role strip that would leave no active admin holding a
+  role is refused with `400 mutability`.
 
 ## Endpoints
 

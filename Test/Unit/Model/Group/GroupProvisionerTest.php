@@ -17,6 +17,7 @@ use DmLab\AdminScim\Model\Group\ScimGroup;
 use DmLab\AdminScim\Model\Group\ScimGroupMapper;
 use DmLab\AdminScim\Model\Group\ScimGroupPatcher;
 use DmLab\AdminScim\Model\Group\ScimGroupRepository;
+use DmLab\AdminScim\Model\User\LastAdminGuard;
 use DmLab\AdminScim\Model\WriteLock;
 use Magento\Framework\App\ResourceConnection;
 use Magento\Framework\DB\Adapter\AdapterInterface;
@@ -45,6 +46,9 @@ class GroupProvisionerTest extends TestCase
     /** @var GroupRoleSynchronizer&MockObject */
     private $roleSynchronizer;
 
+    /** @var LastAdminGuard&\PHPUnit\Framework\MockObject\Stub */
+    private $guard;
+
     /** @var GroupProvisioner */
     private GroupProvisioner $provisioner;
 
@@ -56,6 +60,7 @@ class GroupProvisionerTest extends TestCase
         $this->patcher = $this->createStub(ScimGroupPatcher::class);
         $this->memberResource = $this->createMock(MemberResource::class);
         $this->roleSynchronizer = $this->createMock(GroupRoleSynchronizer::class);
+        $this->guard = $this->createStub(LastAdminGuard::class);
 
         $this->provisioner = $this->createProvisioner($this->createStub(AdapterInterface::class));
     }
@@ -82,7 +87,8 @@ class GroupProvisionerTest extends TestCase
             $this->roleSynchronizer,
             $resource,
             $auditLogger ?? $this->createStub(AuditLogger::class),
-            new WriteLock($lockManager)
+            new WriteLock($lockManager),
+            $this->guard
         );
     }
 
@@ -277,6 +283,56 @@ class GroupProvisionerTest extends TestCase
 
         $this->expectException(\RuntimeException::class);
         $provisioner->replace('10', ['displayName' => 'Admins']);
+    }
+
+    public function testWriteLeavingNoUsableAdminRollsBack(): void
+    {
+        $adapter = $this->createMock(AdapterInterface::class);
+        $adapter->expects(self::once())->method('rollBack');
+        $adapter->expects(self::never())->method('commit');
+        $this->guard = $this->createMock(LastAdminGuard::class);
+        $this->guard->expects(self::once())->method('countUsable')->willReturn(1);
+        $this->guard->expects(self::once())->method('assertUsableAdminRemains')->with(1)
+            ->willThrowException(ScimException::badRequest('last admin', 'mutability'));
+        $provisioner = $this->createProvisioner($adapter);
+
+        $this->repository->method('getById')->willReturn(new ScimGroup(10, 'Admins'));
+        $this->memberResource->expects(self::once())->method('getUserIds')->willReturn([5]);
+        $this->patcher->method('apply')->willReturnCallback(
+            static function (ScimGroup $g, array &$members): void {
+                $members = [];
+            }
+        );
+        $this->groupResource->method('findConflictId')->willReturn(null);
+        $this->groupResource->expects(self::once())->method('save');
+        $this->roleSynchronizer->expects(self::once())->method('syncUsers')->with([5])->willReturn([]);
+
+        try {
+            $provisioner->patch('10', ['Operations' => [['op' => 'remove', 'path' => 'members']]]);
+            self::fail('Expected ScimException');
+        } catch (ScimException $e) {
+            self::assertSame('mutability', $e->getScimType());
+        }
+    }
+
+    public function testDeleteLeavingNoUsableAdminRollsBack(): void
+    {
+        $adapter = $this->createMock(AdapterInterface::class);
+        $adapter->expects(self::once())->method('rollBack');
+        $adapter->expects(self::never())->method('commit');
+        $this->guard = $this->createMock(LastAdminGuard::class);
+        $this->guard->expects(self::once())->method('countUsable')->willReturn(1);
+        $this->guard->expects(self::once())->method('assertUsableAdminRemains')->with(1)
+            ->willThrowException(ScimException::badRequest('last admin', 'mutability'));
+        $provisioner = $this->createProvisioner($adapter);
+
+        $this->repository->method('getById')->willReturn(new ScimGroup(10, 'Admins'));
+        $this->memberResource->expects(self::once())->method('getUserIds')->willReturn([5]);
+        $this->groupResource->expects(self::once())->method('delete');
+        $this->roleSynchronizer->expects(self::once())->method('syncUsers')->willReturn([]);
+
+        $this->expectException(ScimException::class);
+        $provisioner->delete('10');
     }
 
     public function testPatchRechecksDisplayNameUniqueness(): void

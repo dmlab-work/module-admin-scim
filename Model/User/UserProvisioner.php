@@ -37,7 +37,8 @@ use Magento\User\Model\UserFactory;
  * uniqueness is checked against every admin, so a clash with a local one is 409.
  * Every write re-syncs the admin's role, so one with no mapped group gets
  * `default_role` even when the IdP pushes no groups. Deactivation (`active` true → false)
- * also logs out the admin's open backend sessions. Every write runs under the
+ * also logs out the admin's open backend sessions. No update or delete may leave the
+ * store without a usable admin ({@see LastAdminGuard}). Every write runs under the
  * {@see WriteLock} and is audit-logged after it commits.
  */
 class UserProvisioner
@@ -54,6 +55,7 @@ class UserProvisioner
      * @param AuditLogger $auditLogger
      * @param WriteLock $writeLock
      * @param AdminSessionInfoResource $adminSessionResource
+     * @param LastAdminGuard $lastAdminGuard
      */
     public function __construct(
         private readonly ScimUserMapper $mapper,
@@ -66,7 +68,8 @@ class UserProvisioner
         private readonly GroupRoleSynchronizer $roleSynchronizer,
         private readonly AuditLogger $auditLogger,
         private readonly WriteLock $writeLock,
-        private readonly AdminSessionInfoResource $adminSessionResource
+        private readonly AdminSessionInfoResource $adminSessionResource,
+        private readonly LastAdminGuard $lastAdminGuard
     ) {
     }
 
@@ -117,7 +120,7 @@ class UserProvisioner
             ScimUserMapper::EXTERNAL_ID_FIELD => $externalId,
             ScimUserMapper::MANAGED_FIELD => 1,
         ]);
-        $roleChanges = $this->write($user);
+        $roleChanges = $this->write($user, null);
         $this->auditLogger->log('user.create', $this->auditContext($user));
         $this->logRoleChanges($roleChanges);
 
@@ -257,8 +260,8 @@ class UserProvisioner
      * cascade via FK, so open sessions end on their next request.
      *
      * @param string $id the SCIM resource id (admin_user.user_id)
-     * @throws ScimException 404 when absent or not SCIM-managed, 500 when the
-     *         resource model reports a failed delete
+     * @throws ScimException 404 when absent or not SCIM-managed, 400 `mutability` when
+     *         it is the last usable admin, 500 when the resource model reports a failed delete
      */
     public function delete(string $id): void
     {
@@ -273,6 +276,10 @@ class UserProvisioner
     private function doDelete(string $id): void
     {
         $user = $this->repository->getById($id);
+        $this->lastAdminGuard->assertUsableAdminRemains(
+            $this->lastAdminGuard->countUsable(),
+            (int)$user->getId()
+        );
         $context = $this->auditContext($user);
         // The core resource model rolls back and returns false instead of throwing.
         if ($this->userResource->delete($user) === false) {
@@ -322,19 +329,22 @@ class UserProvisioner
      * `_checkUnique` throws the same), so both must be caught.
      *
      * @param User $user
-     * @param bool $activeBefore whether the admin was active before this write
+     * @param bool|null $activeBefore whether the admin was active before this write; null for a new admin
      * @return array<int,array<string,mixed>> committed `role.change` audit contexts
-     * @throws ScimException 409 `uniqueness` on a duplicate-key violation
+     * @throws ScimException 409 `uniqueness` on a duplicate-key violation, 400 `mutability`
+     *         when an update would leave no usable admin
      */
-    private function write(User $user, bool $activeBefore = false): array
+    private function write(User $user, ?bool $activeBefore): array
     {
         $this->userResource->beginTransaction();
         try {
+            $usableBefore = $activeBefore === null ? 0 : $this->lastAdminGuard->countUsable();
             $this->userResource->save($user);
-            if ($activeBefore && (int)$user->getData('is_active') !== 1) {
+            if ($activeBefore === true && (int)$user->getData('is_active') !== 1) {
                 $this->endSessions((int)$user->getId());
             }
             $roleChanges = $this->roleSynchronizer->syncUsers([(int)$user->getId()]);
+            $this->lastAdminGuard->assertUsableAdminRemains($usableBefore);
             $this->userResource->commit();
 
             return $roleChanges;

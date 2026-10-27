@@ -17,6 +17,7 @@ use DmLab\AdminScim\Model\Mapping\MappingEngine;
 use DmLab\AdminScim\Model\Normalization\RequestNormalizerChain;
 use DmLab\AdminScim\Model\Response\ListResponseBuilder;
 use DmLab\AdminScim\Model\User\FilterParser;
+use DmLab\AdminScim\Model\User\LastAdminGuard;
 use DmLab\AdminScim\Model\User\ScimUserMapper;
 use DmLab\AdminScim\Model\User\ScimUserPatcher;
 use DmLab\AdminScim\Model\User\ScimUserRepository;
@@ -81,7 +82,8 @@ class UserLifecycleTest extends TestCase
             $this->makeSynchronizer(),
             $this->createStub(AuditLogger::class),
             $this->createWriteLock(),
-            $this->createStub(AdminSessionInfoResource::class)
+            $this->createStub(AdminSessionInfoResource::class),
+            $this->createStub(LastAdminGuard::class)
         );
     }
 
