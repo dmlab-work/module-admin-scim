@@ -14,6 +14,8 @@ use DmLab\AdminScim\Model\WriteLock;
 use Magento\Framework\DB\Adapter\DuplicateException;
 use Magento\Framework\Exception\AlreadyExistsException;
 use Magento\Framework\Math\Random;
+use Magento\Security\Model\AdminSessionInfo;
+use Magento\Security\Model\ResourceModel\AdminSessionInfo as AdminSessionInfoResource;
 use Magento\User\Model\ResourceModel\User as UserResource;
 use Magento\User\Model\ResourceModel\User\CollectionFactory as UserCollectionFactory;
 use Magento\User\Model\User;
@@ -34,7 +36,8 @@ use Magento\User\Model\UserFactory;
  * SCIM-managed; PUT/PATCH/DELETE reach only managed admins (via the repository), while
  * uniqueness is checked against every admin, so a clash with a local one is 409.
  * Every write re-syncs the admin's role, so one with no mapped group gets
- * `default_role` even when the IdP pushes no groups. Every write runs under the
+ * `default_role` even when the IdP pushes no groups. Deactivation (`active` true → false)
+ * also logs out the admin's open backend sessions. Every write runs under the
  * {@see WriteLock} and is audit-logged after it commits.
  */
 class UserProvisioner
@@ -50,6 +53,7 @@ class UserProvisioner
      * @param GroupRoleSynchronizer $roleSynchronizer
      * @param AuditLogger $auditLogger
      * @param WriteLock $writeLock
+     * @param AdminSessionInfoResource $adminSessionResource
      */
     public function __construct(
         private readonly ScimUserMapper $mapper,
@@ -61,7 +65,8 @@ class UserProvisioner
         private readonly ScimUserPatcher $patcher,
         private readonly GroupRoleSynchronizer $roleSynchronizer,
         private readonly AuditLogger $auditLogger,
-        private readonly WriteLock $writeLock
+        private readonly WriteLock $writeLock,
+        private readonly AdminSessionInfoResource $adminSessionResource
     ) {
     }
 
@@ -153,6 +158,7 @@ class UserProvisioner
         $externalId = $this->mapper->extractExternalId($payload);
 
         $currentId = (int)$user->getId();
+        $activeBefore = (bool)(int)$user->getData('is_active');
         $this->assertUnique('username', $userName, 'A user with this userName already exists.', $currentId);
         $this->assertUnique('email', $email, 'A user with this email already exists.', $currentId);
         if ($externalId !== null) {
@@ -172,7 +178,7 @@ class UserProvisioner
             'is_active' => $this->mapper->extractActive($payload) ? 1 : 0,
             ScimUserMapper::EXTERNAL_ID_FIELD => $externalId,
         ]);
-        $roleChanges = $this->write($user);
+        $roleChanges = $this->write($user, $activeBefore);
         $this->auditLogger->log('user.replace', $this->auditContext($user));
         $this->logRoleChanges($roleChanges);
 
@@ -232,7 +238,7 @@ class UserProvisioner
                 $currentId
             );
         }
-        $roleChanges = $this->write($user);
+        $roleChanges = $this->write($user, $activeBefore);
         $this->auditLogger->log('user.patch', $this->auditContext($user) + [
             'active_before' => $activeBefore,
             'active_after' => (bool)(int)$user->getData('is_active'),
@@ -247,7 +253,8 @@ class UserProvisioner
      *
      * A hard delete so a later GET is a 404 (RFC 7644 §3.6) and re-provisioning
      * the same `userName` does not 409 on a leftover row. The core resource model
-     * also drops the admin's role rows; group membership rows cascade via FK.
+     * also drops the admin's role rows; group membership and backend session rows
+     * cascade via FK, so open sessions end on their next request.
      *
      * @param string $id the SCIM resource id (admin_user.user_id)
      * @throws ScimException 404 when absent or not SCIM-managed, 500 when the
@@ -315,14 +322,18 @@ class UserProvisioner
      * `_checkUnique` throws the same), so both must be caught.
      *
      * @param User $user
+     * @param bool $activeBefore whether the admin was active before this write
      * @return array<int,array<string,mixed>> committed `role.change` audit contexts
      * @throws ScimException 409 `uniqueness` on a duplicate-key violation
      */
-    private function write(User $user): array
+    private function write(User $user, bool $activeBefore = false): array
     {
         $this->userResource->beginTransaction();
         try {
             $this->userResource->save($user);
+            if ($activeBefore && (int)$user->getData('is_active') !== 1) {
+                $this->endSessions((int)$user->getId());
+            }
             $roleChanges = $this->roleSynchronizer->syncUsers([(int)$user->getId()]);
             $this->userResource->commit();
 
@@ -334,6 +345,23 @@ class UserProvisioner
             $this->userResource->rollBack();
             throw $e;
         }
+    }
+
+    /**
+     * Log out the admin's open backend sessions.
+     *
+     * The backend session caches the user object, so core's `is_active` check on prolong
+     * never sees the deactivation; Magento_Security's prolong plugin re-reads this status.
+     *
+     * @param int $userId
+     */
+    private function endSessions(int $userId): void
+    {
+        $this->adminSessionResource->updateStatusByUserId(
+            AdminSessionInfo::LOGGED_OUT,
+            $userId,
+            [AdminSessionInfo::LOGGED_IN]
+        );
     }
 
     /**

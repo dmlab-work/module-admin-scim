@@ -34,6 +34,7 @@ class PackagingTest extends TestCase
             'magento/module-authorization',
             'magento/module-store',
             'magento/module-config',
+            'magento/module-security',
             'psr/log',
         ]);
     }
@@ -52,7 +53,7 @@ class PackagingTest extends TestCase
                 $sequenced[] = $item->getAttribute('name');
             }
         }
-        self::assertSame(['Magento_User', 'Magento_Authorization', 'Magento_Config'], $sequenced);
+        self::assertSame(['Magento_User', 'Magento_Authorization', 'Magento_Config', 'Magento_Security'], $sequenced);
     }
 
     public function testEveryTranslatableConfigTextHasAnI18nPhrase(): void

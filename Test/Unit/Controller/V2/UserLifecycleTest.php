@@ -27,6 +27,7 @@ use DmLab\AdminScim\Test\Unit\Doubles\ScimResponseCapture;
 use Magento\Authorization\Model\Role;
 use Magento\Authorization\Model\RoleFactory;
 use Magento\Framework\Serialize\Serializer\Json;
+use Magento\Security\Model\ResourceModel\AdminSessionInfo as AdminSessionInfoResource;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
@@ -79,7 +80,8 @@ class UserLifecycleTest extends TestCase
             $patcher,
             $this->makeSynchronizer(),
             $this->createStub(AuditLogger::class),
-            $this->createWriteLock()
+            $this->createWriteLock(),
+            $this->createStub(AdminSessionInfoResource::class)
         );
     }
 

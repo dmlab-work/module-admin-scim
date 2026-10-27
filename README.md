@@ -41,7 +41,7 @@ https://<your-store>/admin-scim/v2
 | POST | `/Users` | Create an admin user |
 | GET | `/Users/{id}` · `/Users?filter=…` | Read one · list with filter + pagination |
 | PUT | `/Users/{id}` | Replace the whole resource |
-| PATCH | `/Users/{id}` | Add/replace/remove attrs; `active=false` deprovisions |
+| PATCH | `/Users/{id}` | Add/replace/remove attrs; `active=false` deprovisions and ends open admin sessions |
 | DELETE | `/Users/{id}` | Hard delete (`204`) |
 | POST | `/Groups` | Create a group |
 | GET | `/Groups/{id}` · `/Groups?filter=…` | Read one · list with filter + pagination |

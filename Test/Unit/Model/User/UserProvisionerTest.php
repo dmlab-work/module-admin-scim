@@ -20,6 +20,8 @@ use Magento\Framework\Exception\AlreadyExistsException;
 use Magento\Framework\Lock\LockManagerInterface;
 use Magento\Framework\Math\Random;
 use Magento\Framework\Phrase;
+use Magento\Security\Model\AdminSessionInfo;
+use Magento\Security\Model\ResourceModel\AdminSessionInfo as AdminSessionInfoResource;
 use Magento\User\Model\ResourceModel\User as UserResource;
 use Magento\User\Model\ResourceModel\User\Collection;
 use Magento\User\Model\ResourceModel\User\CollectionFactory as UserCollectionFactory;
@@ -57,6 +59,9 @@ class UserProvisionerTest extends TestCase
     /** @var AuditLogger&\PHPUnit\Framework\MockObject\Stub */
     private $auditLogger;
 
+    /** @var AdminSessionInfoResource&\PHPUnit\Framework\MockObject\Stub */
+    private $sessionResource;
+
     /** @var UserProvisioner */
     private UserProvisioner $provisioner;
 
@@ -72,6 +77,7 @@ class UserProvisionerTest extends TestCase
         $this->patcher = $this->createStub(ScimUserPatcher::class);
         $this->synchronizer = $this->createStub(GroupRoleSynchronizer::class);
         $this->auditLogger = $this->createStub(AuditLogger::class);
+        $this->sessionResource = $this->createStub(AdminSessionInfoResource::class);
 
         $this->provisioner = $this->provisionerWith($this->synchronizer);
     }
@@ -96,7 +102,8 @@ class UserProvisionerTest extends TestCase
             $this->patcher,
             $synchronizer,
             $auditLogger ?? $this->auditLogger,
-            $this->writeLock()
+            $this->writeLock(),
+            $this->sessionResource
         );
     }
 
@@ -503,7 +510,8 @@ class UserProvisionerTest extends TestCase
             $patcher,
             $this->synchronizer,
             $this->auditLogger,
-            $this->writeLock()
+            $this->writeLock(),
+            $this->sessionResource
         );
     }
 
@@ -785,6 +793,105 @@ class UserProvisionerTest extends TestCase
         )->patch('42', ['Operations' => [['op' => 'replace', 'path' => 'active', 'value' => false]]]);
     }
 
+    /**
+     * Swap in a session resource expecting the LOGGED_IN → LOGGED_OUT update for admin 42.
+     *
+     * @param \PHPUnit\Framework\MockObject\Rule\InvocationOrder $times
+     */
+    private function expectSessionLogout($times): void
+    {
+        $this->sessionResource = $this->createMock(AdminSessionInfoResource::class);
+        $this->sessionResource->expects($times)->method('updateStatusByUserId')
+            ->with(AdminSessionInfo::LOGGED_OUT, 42, [AdminSessionInfo::LOGGED_IN]);
+        $this->provisioner = $this->provisionerWith($this->synchronizer);
+    }
+
+    public function testPatchDeactivationLogsOutOpenSessions(): void
+    {
+        $data = ['username' => 'jane.doe', 'email' => 'jane@example.com', 'is_active' => '1'];
+        $this->repository->method('getById')->willReturn($this->userWithData(42, $data));
+        $this->patcher->method('apply')->willReturnCallback(
+            static function () use (&$data): void {
+                $data['is_active'] = 0;
+            }
+        );
+        $this->collectionFactory->expects(self::atLeastOnce())->method('create')
+            ->willReturn($this->collectionReturning($this->emptyUser()));
+        $this->userFactory->expects(self::never())->method('create');
+        $this->userResource->expects(self::atLeastOnce())->method('save');
+        $this->expectSessionLogout(self::once());
+
+        $this->provisioner->patch('42', ['Operations' => [['op' => 'replace', 'path' => 'active', 'value' => false]]]);
+    }
+
+    public function testReplaceDeactivationLogsOutOpenSessions(): void
+    {
+        $this->mapperReturns(null, false);
+        $data = ['username' => 'jane.doe', 'is_active' => '1'];
+        $this->repository->method('getById')->willReturn($this->userWithData(42, $data));
+        $this->collectionFactory->expects(self::atLeastOnce())->method('create')
+            ->willReturn($this->collectionReturning($this->emptyUser()));
+        $this->userFactory->expects(self::never())->method('create');
+        $this->userResource->expects(self::atLeastOnce())->method('save');
+        $this->expectSessionLogout(self::once());
+
+        $this->provisioner->replace('42', ['userName' => 'jane.doe', 'active' => false]);
+    }
+
+    public function testSessionsKeptWhenActiveStateDoesNotDrop(): void
+    {
+        $data = ['username' => 'jane.doe', 'email' => 'jane@example.com', 'is_active' => '0'];
+        $this->repository->method('getById')->willReturn($this->userWithData(42, $data));
+        $this->collectionFactory->expects(self::atLeastOnce())->method('create')
+            ->willReturn($this->collectionReturning($this->emptyUser()));
+        $this->userFactory->expects(self::never())->method('create');
+        $this->userResource->expects(self::atLeastOnce())->method('save');
+        $this->expectSessionLogout(self::never());
+
+        // Already inactive: deactivating again ends nothing new.
+        $this->provisioner->patch('42', ['Operations' => [['op' => 'replace', 'path' => 'active', 'value' => false]]]);
+        $data['is_active'] = '1';
+        $this->provisioner->patch('42', ['Operations' => [['op' => 'replace', 'path' => 'name.givenName', 'value' => 'J']]]);
+    }
+
+    public function testDeactivationSessionLogoutRollsBackWithTheWrite(): void
+    {
+        $data = ['username' => 'jane.doe', 'email' => 'jane@example.com', 'is_active' => '1'];
+        $this->repository->method('getById')->willReturn($this->userWithData(42, $data));
+        $this->patcher->method('apply')->willReturnCallback(
+            static function () use (&$data): void {
+                $data['is_active'] = 0;
+            }
+        );
+        $this->collectionFactory->expects(self::atLeastOnce())->method('create')
+            ->willReturn($this->collectionReturning($this->emptyUser()));
+        $this->userFactory->expects(self::never())->method('create');
+        $this->userResource->expects(self::atLeastOnce())->method('save');
+        $calls = [];
+        $this->sessionResource->method('updateStatusByUserId')->willReturnCallback(
+            static function () use (&$calls): int {
+                $calls[] = 'logout';
+                return 1;
+            }
+        );
+        $this->userResource->method('beginTransaction')->willReturnCallback(
+            function () use (&$calls) {
+                $calls[] = 'begin';
+                return $this->userResource;
+            }
+        );
+        $this->userResource->method('commit')->willReturnCallback(
+            function () use (&$calls) {
+                $calls[] = 'commit';
+                return $this->userResource;
+            }
+        );
+
+        $this->provisioner->patch('42', ['Operations' => [['op' => 'replace', 'path' => 'active', 'value' => false]]]);
+
+        self::assertSame(['begin', 'logout', 'commit'], $calls);
+    }
+
     public function testDeleteLogsUserDelete(): void
     {
         $data = ['username' => 'jane.doe'];
@@ -950,7 +1057,8 @@ class UserProvisionerTest extends TestCase
             $this->patcher,
             $this->synchronizer,
             $this->auditLogger,
-            new WriteLock($lockManager)
+            new WriteLock($lockManager),
+            $this->sessionResource
         );
 
         $this->expectException(ScimException::class);
