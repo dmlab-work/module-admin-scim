@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.4
+
+- Requires Magento 2.4.7+ and PHP 8.2–8.5.
+- CI runs unit tests on PHP 8.2–8.5; CI installs are no longer counted as Packagist downloads.
+- composer.json: keywords, homepage and support links.
+- README restructured.
+
 ## 0.2.3
 
 - SCIM deactivation and delete revoke the admin's REST API tokens (core does this only in a `User::save()` plugin, which the SCIM write path skips); requires `Magento_Integration`.
