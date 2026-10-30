@@ -59,13 +59,12 @@ try {
     // Already registered.
 }
 
-// Generate Factory/Proxy/ExtensionAttributes classes on demand when Magento's generated/ code is absent.
+// Generate Factory/ExtensionAttributes classes on demand when Magento's generated/ code is absent.
 $generatedCodeAutoloader = new \Magento\Framework\TestFramework\Unit\Autoloader\GeneratedClassesAutoloader(
     [
         new \Magento\Framework\TestFramework\Unit\Autoloader\ExtensionAttributesGenerator(),
         new \Magento\Framework\TestFramework\Unit\Autoloader\ExtensionAttributesInterfaceGenerator(),
         new \Magento\Framework\TestFramework\Unit\Autoloader\FactoryGenerator(),
-        new \Magento\Framework\TestFramework\Unit\Autoloader\ProxyGenerator(),
     ],
     new \Magento\Framework\Code\Generator\Io(
         new \Magento\Framework\Filesystem\Driver\File(),
