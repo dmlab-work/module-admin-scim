@@ -54,7 +54,10 @@ class PackagingTest extends TestCase
                 $sequenced[] = $item->getAttribute('name');
             }
         }
-        self::assertSame(['Magento_User', 'Magento_Authorization', 'Magento_Config', 'Magento_Security', 'Magento_Integration'], $sequenced);
+        self::assertSame(
+            ['Magento_User', 'Magento_Authorization', 'Magento_Config', 'Magento_Security', 'Magento_Integration'],
+            $sequenced
+        );
     }
 
     public function testEveryTranslatableConfigTextHasAnI18nPhrase(): void
@@ -84,6 +87,27 @@ class PackagingTest extends TestCase
         foreach ($texts as $text) {
             self::assertContains($text, $phrases);
         }
+    }
+
+    public function testReadmeTaglineLeadsWithOffboarding(): void
+    {
+        $lines = file(self::MODULE_ROOT . '/README.md', FILE_IGNORE_NEW_LINES) ?: [];
+        $tagline = current(array_filter($lines, static fn (string $l): bool => str_starts_with($l, '> '))) ?: '';
+
+        self::assertStringStartsWith('> Automatic admin offboarding', $tagline);
+    }
+
+    public function testComposerDescriptionLeadsWithOffboarding(): void
+    {
+        self::assertStringStartsWith('Automatic admin offboarding', $this->composer()['description'] ?? '');
+    }
+
+    public function testChangelogTopSectionMatchesComposerVersion(): void
+    {
+        $lines = file(self::MODULE_ROOT . '/CHANGELOG.md', FILE_IGNORE_NEW_LINES) ?: [];
+        $heading = current(array_filter($lines, static fn (string $l): bool => str_starts_with($l, '## '))) ?: '';
+
+        self::assertSame('## ' . ($this->composer()['version'] ?? ''), $heading);
     }
 
     private function composer(): array

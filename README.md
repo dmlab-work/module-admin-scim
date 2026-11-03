@@ -1,6 +1,6 @@
 # DmLab_AdminScim
 
-> SCIM 2.0 provisioning server for Magento 2 admin users.
+> Automatic admin offboarding for Magento 2: SCIM 2.0 provisioning from Okta or Entra.
 
 [![CI](https://github.com/dmlab-work/module-admin-scim/actions/workflows/ci.yml/badge.svg)](https://github.com/dmlab-work/module-admin-scim/actions/workflows/ci.yml) [![codecov](https://codecov.io/gh/dmlab-work/module-admin-scim/graph/badge.svg)](https://codecov.io/gh/dmlab-work/module-admin-scim) [![Packagist Version](https://img.shields.io/packagist/v/dmlab/module-admin-scim)](https://packagist.org/packages/dmlab/module-admin-scim) [![Downloads](https://img.shields.io/packagist/dt/dmlab/module-admin-scim)](https://packagist.org/packages/dmlab/module-admin-scim) [![PHP](https://img.shields.io/packagist/dependency-v/dmlab/module-admin-scim/php)](https://packagist.org/packages/dmlab/module-admin-scim) [![License](https://img.shields.io/packagist/l/dmlab/module-admin-scim)](LICENSE) ![Magento](https://img.shields.io/badge/Magento-2.4-orange)
 

@@ -1,6 +1,6 @@
 {
     "name": "dmlab/module-admin-scim",
-    "description": "SCIM 2.0 provisioning server for Magento 2 admin users — RFC 7643/7644 endpoints so an IdP (Okta, Entra) can create, update and deactivate admin_user accounts and map groups to ACL roles, without anyone logging in.",
+    "description": "Automatic admin offboarding for Magento 2: when IT removes a user in Okta or Entra, the admin account is deactivated; new hires get the right ACL role before they log in. SCIM 2.0 (RFC 7643/7644) provisioning server for admin_user.",
     "keywords": [
         "magento2",
         "magento2-module",
@@ -18,7 +18,7 @@
     "homepage": "https://github.com/dmlab-work/module-admin-scim",
     "type": "magento2-module",
     "license": "OSL-3.0",
-    "version": "0.2.4",
+    "version": "0.2.5",
     "support": {
         "issues": "https://github.com/dmlab-work/module-admin-scim/issues",
         "source": "https://github.com/dmlab-work/module-admin-scim"

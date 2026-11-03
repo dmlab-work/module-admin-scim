@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.5
+
+- README tagline and Packagist description lead with automatic admin offboarding.
+
 ## 0.2.4
 
 - Requires Magento 2.4.7+ and PHP 8.2–8.5.
