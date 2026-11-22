@@ -33,6 +33,7 @@ use DmLab\AdminScim\Model\Mapping\MappingEngine;
 use Magento\Authorization\Model\Role;
 use Magento\Authorization\Model\RoleFactory;
 use Magento\Framework\Serialize\Serializer\Json;
+use Magento\Security\Model\ResourceModel\AdminSessionInfo as AdminSessionInfoResource;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\LoggerInterface;
 
@@ -74,6 +75,9 @@ class GroupRoleLifecycleTest extends TestCase
     /** @var int last assigned group auto-increment id */
     private int $groupAutoId = 0;
 
+    /** @var int[] user ids whose backend sessions were logged out */
+    private array $loggedOut = [];
+
     protected function setUp(): void
     {
         $this->store = $this->createAdminUserStore();
@@ -105,7 +109,8 @@ class GroupRoleLifecycleTest extends TestCase
             $this->memberResource,
             $this->store->userFactory,
             $this->store->userResource,
-            $this->makeRoleFactory()
+            $this->makeRoleFactory(),
+            $this->makeSessionResource()
         );
 
         $this->provisioner = new GroupProvisioner(
@@ -120,6 +125,23 @@ class GroupRoleLifecycleTest extends TestCase
             $this->createWriteLock(),
             $this->createStub(LastAdminGuard::class)
         );
+    }
+
+    /**
+     * Session resource double recording whose backend sessions were logged out.
+     */
+    private function makeSessionResource(): AdminSessionInfoResource
+    {
+        $resource = $this->createStub(AdminSessionInfoResource::class);
+        $resource->method('updateStatusByUserId')->willReturnCallback(
+            function (int $status, int $userId): int {
+                $this->loggedOut[] = $userId;
+
+                return 1;
+            }
+        );
+
+        return $resource;
     }
 
     public function testGroupMembershipDrivesAdminRole(): void
@@ -172,6 +194,8 @@ class GroupRoleLifecycleTest extends TestCase
         // The former member's only mapped group is gone → role stripped, account kept.
         self::assertSame(0, (int)$this->store->rows[1]['role_id']);
         self::assertArrayHasKey(1, $this->store->rows);
+        // Both the grant and the strip end the admin's open backend sessions.
+        self::assertSame([1, 1], $this->loggedOut);
 
         [$status] = $this->dispatch('GET', self::BASE . '/' . $created['id']);
         self::assertSame(404, $status);

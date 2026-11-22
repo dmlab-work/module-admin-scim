@@ -11,6 +11,8 @@ use DmLab\AdminScim\Model\Config;
 use DmLab\AdminScim\Model\Mapping\MappingEngine;
 use DmLab\AdminScim\Model\User\ScimUserMapper;
 use Magento\Authorization\Model\RoleFactory;
+use Magento\Security\Model\AdminSessionInfo;
+use Magento\Security\Model\ResourceModel\AdminSessionInfo as AdminSessionInfoResource;
 use Magento\User\Model\ResourceModel\User as UserResource;
 use Magento\User\Model\User;
 use Magento\User\Model\UserFactory;
@@ -25,8 +27,9 @@ use Magento\User\Model\UserFactory;
  * single role. When nothing resolves the current role is stripped (deny), so
  * removing a user from its last mapped group revokes admin access. Admins not
  * SCIM-managed are never touched, even if a stale membership row names them.
- * Every role change, including a strip, is returned for the caller to audit-log
- * once its transaction commits, so a rolled-back change is never recorded.
+ * Every role change, including a strip, logs the admin out of its open backend
+ * sessions and is returned for the caller to audit-log once its transaction
+ * commits, so a rolled-back change is never recorded.
  *
  * Mirrors admin-sso's login-time RoleAssigner, but the group source is SCIM
  * membership rather than an SSO identity — SCIM provisions the role in the
@@ -41,6 +44,7 @@ class GroupRoleSynchronizer
      * @param UserFactory $userFactory
      * @param UserResource $userResource
      * @param RoleFactory $roleFactory
+     * @param AdminSessionInfoResource $adminSessionResource
      */
     public function __construct(
         private readonly Config $config,
@@ -48,7 +52,8 @@ class GroupRoleSynchronizer
         private readonly MemberResource $memberResource,
         private readonly UserFactory $userFactory,
         private readonly UserResource $userResource,
-        private readonly RoleFactory $roleFactory
+        private readonly RoleFactory $roleFactory,
+        private readonly AdminSessionInfoResource $adminSessionResource
     ) {
     }
 
@@ -115,12 +120,31 @@ class GroupRoleSynchronizer
             }
             $user->setData('role_id', 0);
             $this->userResource->save($user);
+            $this->endSessions($userId);
             return $this->roleChange($user, $currentRoleId, null);
         }
 
         $user->setData('role_id', (int)$roleId);
         $this->userResource->save($user);
+        $this->endSessions($userId);
         return $this->roleChange($user, $currentRoleId, $roleId);
+    }
+
+    /**
+     * Log out the admin's open backend sessions.
+     *
+     * The backend session caches the role and ACL until re-login. API tokens are kept:
+     * web API re-reads the role on every request.
+     *
+     * @param int $userId
+     */
+    private function endSessions(int $userId): void
+    {
+        $this->adminSessionResource->updateStatusByUserId(
+            AdminSessionInfo::LOGGED_OUT,
+            $userId,
+            [AdminSessionInfo::LOGGED_IN]
+        );
     }
 
     /**

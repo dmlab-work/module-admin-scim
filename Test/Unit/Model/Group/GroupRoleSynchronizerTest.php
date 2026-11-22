@@ -14,6 +14,8 @@ use DmLab\AdminScim\Model\Mapping\MappingEngine;
 use DmLab\AdminScim\Model\User\ScimUserMapper;
 use Magento\Authorization\Model\Role;
 use Magento\Authorization\Model\RoleFactory;
+use Magento\Security\Model\AdminSessionInfo;
+use Magento\Security\Model\ResourceModel\AdminSessionInfo as AdminSessionInfoResource;
 use Magento\User\Model\ResourceModel\User as UserResource;
 use Magento\User\Model\User;
 use Magento\User\Model\UserFactory;
@@ -48,15 +50,36 @@ class GroupRoleSynchronizerTest extends TestCase
         $this->userResource = $this->createMock(UserResource::class);
         $this->roleFactory = $this->createStub(RoleFactory::class);
 
-        // Real mapping engine — resolution is what we exercise.
-        $this->synchronizer = new GroupRoleSynchronizer(
+        $this->synchronizer = $this->makeSynchronizer($this->createStub(AdminSessionInfoResource::class));
+    }
+
+    /**
+     * Real mapping engine — resolution is what we exercise.
+     */
+    private function makeSynchronizer(AdminSessionInfoResource $sessionResource): GroupRoleSynchronizer
+    {
+        return new GroupRoleSynchronizer(
             $this->config,
             new MappingEngine(),
             $this->memberResource,
             $this->userFactory,
             $this->userResource,
-            $this->roleFactory
+            $this->roleFactory,
+            $sessionResource
         );
+    }
+
+    /**
+     * Rebuild the synchronizer on a session resource mock for expectations.
+     *
+     * @return AdminSessionInfoResource&MockObject
+     */
+    private function sessionResourceMock()
+    {
+        $sessionResource = $this->createMock(AdminSessionInfoResource::class);
+        $this->synchronizer = $this->makeSynchronizer($sessionResource);
+
+        return $sessionResource;
     }
 
     /**
@@ -320,5 +343,59 @@ class GroupRoleSynchronizerTest extends TestCase
         $this->userResource->expects(self::never())->method('save');
 
         self::assertSame([], $this->synchronizer->syncUsers([1]));
+    }
+
+    /**
+     * Expect the admin's open backend sessions to be logged out exactly once.
+     */
+    private function expectSessionsEnded(int $userId): void
+    {
+        $this->sessionResourceMock()->expects(self::once())->method('updateStatusByUserId')
+            ->with(AdminSessionInfo::LOGGED_OUT, $userId, [AdminSessionInfo::LOGGED_IN]);
+    }
+
+    public function testRoleChangeEndsBackendSessions(): void
+    {
+        $this->withRules(['Admins' => '5']);
+        $this->memberResource->method('getGroupDisplayNamesForUser')->willReturn(['Admins']);
+        $this->resolvedRoleExists(true);
+        $this->user(1, '2')->expects(self::once())->method('setData')->with('role_id', 5);
+        $this->userResource->expects(self::once())->method('save');
+        $this->expectSessionsEnded(1);
+
+        $this->synchronizer->syncUsers([1]);
+    }
+
+    public function testRoleStripEndsBackendSessions(): void
+    {
+        $this->withRules(['Admins' => '5']);
+        $this->memberResource->method('getGroupDisplayNamesForUser')->willReturn([]);
+        $this->user(1, '2')->expects(self::once())->method('setData')->with('role_id', 0);
+        $this->userResource->expects(self::once())->method('save');
+        $this->expectSessionsEnded(1);
+
+        $this->synchronizer->syncUsers([1]);
+    }
+
+    public function testUnchangedRoleKeepsBackendSessions(): void
+    {
+        $this->withRules(['Admins' => '5']);
+        $this->memberResource->method('getGroupDisplayNamesForUser')->willReturn(['Admins']);
+        $this->user(1, '5')->expects(self::never())->method('setData');
+        $this->userResource->expects(self::never())->method('save');
+        $this->sessionResourceMock()->expects(self::never())->method('updateStatusByUserId');
+
+        $this->synchronizer->syncUsers([1]);
+    }
+
+    public function testUnmanagedAdminKeepsBackendSessions(): void
+    {
+        $this->withRules(['Admins' => '5']);
+        $this->memberResource->method('getGroupDisplayNamesForUser')->willReturn([]);
+        $this->user(1, '2', false)->expects(self::never())->method('setData');
+        $this->userResource->expects(self::never())->method('save');
+        $this->sessionResourceMock()->expects(self::never())->method('updateStatusByUserId');
+
+        $this->synchronizer->syncUsers([1]);
     }
 }

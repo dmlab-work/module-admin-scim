@@ -123,7 +123,8 @@ class UserLifecycleTest extends TestCase
             $memberResource,
             $this->store->userFactory,
             $this->store->userResource,
-            $roleFactory
+            $roleFactory,
+            $this->createStub(AdminSessionInfoResource::class)
         );
     }
 

@@ -40,7 +40,8 @@ use Magento\User\Model\UserFactory;
  * uniqueness is checked against every admin, so a clash with a local one is 409.
  * Every write re-syncs the admin's role, so one with no mapped group gets
  * `default_role` even when the IdP pushes no groups. Deactivation (`active` true → false)
- * also logs out the admin's open backend sessions. No update or delete may leave the
+ * logs out the admin's open backend sessions and revokes its API tokens; a role change
+ * logs out its sessions ({@see GroupRoleSynchronizer}). No update or delete may leave the
  * store without a usable admin ({@see LastAdminGuard}). Every write runs under the
  * {@see WriteLock} and is audit-logged after it commits.
  */
