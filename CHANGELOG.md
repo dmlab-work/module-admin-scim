@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.2.6
+
+- Security: a SCIM role change (group membership, group delete, members replaced) logs the admin out of open backend sessions, so the new role applies at once.
+
 ## 0.2.5
 
 - README tagline and Packagist description lead with automatic admin offboarding.
